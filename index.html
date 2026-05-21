@@ -418,12 +418,13 @@ function resetState(){
   lastProgressAt = 0;
 }
 
-function bump(type, day, value){
+function bump(type, day, source, value){
   let m = daily[type]; if (!m){ m = daily[type] = {}; }
-  let r = m[day]; if (!r){ r = m[day] = {sum:0, count:0, min:Infinity, max:-Infinity}; }
-  r.sum += value; r.count += 1;
-  if (value < r.min) r.min = value;
-  if (value > r.max) r.max = value;
+  let r = m[day]; if (!r){ r = m[day] = {}; }
+  let s = r[source]; if (!s){ s = r[source] = {sum:0, count:0, min:Infinity, max:-Infinity}; }
+  s.sum += value; s.count += 1;
+  if (value < s.min) s.min = value;
+  if (value > s.max) s.max = value;
 }
 function sleepNight(startMs){
   const d = new Date(startMs + TZ_MIN*60000);
@@ -477,7 +478,8 @@ function processChunkStr(chunkStr){
         const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
         const endMs = parseAppleDate(em[1]); if (!endMs) continue;
         const day = dayKey(startMs, TZ_MIN);
-        bump('MindfulMinutes', day, (endMs-startMs)/60000);
+        const srcMM = (attrs.match(ATTR_RE.sourceName) || [])[1] || '?';
+        bump('MindfulMinutes', day, srcMM, (endMs-startMs)/60000);
         continue;
       }
 
@@ -485,6 +487,7 @@ function processChunkStr(chunkStr){
       const value = parseFloat(vm[1]);
       if (isNaN(value)) continue;
       const day = dayKey(startMs, TZ_MIN);
+      const source = (attrs.match(ATTR_RE.sourceName) || [])[1] || '?';
 
       if (firstSeenDate === null || day < firstSeenDate) firstSeenDate = day;
       if (lastSeenDate === null || day > lastSeenDate) lastSeenDate = day;
@@ -500,7 +503,7 @@ function processChunkStr(chunkStr){
         if (unit === 'ft') v = value * 30.48;
         else if (unit === 'in') v = value * 2.54;
       }
-      bump(short, day, v);
+      bump(short, day, source, v);
 
     } else if (tag === 'Workout'){
       const wm = attrs.match(ATTR_RE.workoutActivityType); if (!wm) continue;
@@ -555,14 +558,45 @@ function finalize(){
 
   postMessage({type:'progress', pct: 95, text:'Building summaries…'});
 
-  // Compute daily averages from sum/count
+  // For each metric type, decide aggregation strategy:
+  // - SUM_DEDUP types (steps, energy, distance, etc): per day, pick best source (highest count),
+  //   then use ONLY that source's sum to avoid double-counting iPhone+Watch overlap.
+  // - AVG types (HR, HRV, RHR, VO2, weight, BF%): merge all sources' values; their averages
+  //   converge anyway. Use combined sum/count, plus track combined min/max.
+  const SUM_DEDUP = new Set([
+    'StepCount','DistanceWalkingRunning','DistanceCycling','FlightsClimbed',
+    'ActiveEnergyBurned','BasalEnergyBurned','AppleExerciseTime','AppleStandTime',
+    'TimeInDaylight','MindfulMinutes'
+  ]);
+
   const dailyAvg = {};
   for (const t in daily){
     const m = daily[t];
     const out = {};
+    const useDedup = SUM_DEDUP.has(t);
     for (const day in m){
-      const r = m[day];
-      out[day] = {avg: r.sum/r.count, sum: r.sum, count: r.count, min: r.min, max: r.max};
+      const sources = m[day]; // {source: {sum,count,min,max}}
+      if (useDedup){
+        // Pick source with highest count (most data points on this day)
+        let best = null, bestCount = -1;
+        for (const src in sources){
+          if (sources[src].count > bestCount){ bestCount = sources[src].count; best = sources[src]; }
+        }
+        if (best){
+          out[day] = {avg: best.sum/best.count, sum: best.sum, count: best.count, min: best.min, max: best.max};
+        }
+      } else {
+        // Merge all sources
+        let sum=0, count=0, mn=Infinity, mx=-Infinity;
+        for (const src in sources){
+          sum += sources[src].sum; count += sources[src].count;
+          if (sources[src].min < mn) mn = sources[src].min;
+          if (sources[src].max > mx) mx = sources[src].max;
+        }
+        if (count > 0){
+          out[day] = {avg: sum/count, sum, count, min: mn, max: mx};
+        }
+      }
     }
     dailyAvg[t] = out;
   }
@@ -945,15 +979,31 @@ function rollingMean(arr, win){
   return out;
 }
 
-// month-over-month delta of mean: returns {curMean, prevMean, delta, deltaPct}
-function momCompare(values, days){
-  // last 30 days vs prior 30 days
-  if (values.length < 31) return {cur:null, prev:null, delta:null, deltaPct:null};
-  const cur = values.slice(-30).filter(v => v!=null);
-  const prev = values.slice(-60, -30).filter(v => v!=null);
-  if (cur.length < 5 || prev.length < 5) return {cur: cur.length?avg(cur):null, prev: prev.length?avg(prev):null, delta:null, deltaPct:null};
+// month-over-month delta of mean: returns {cur, prev, delta, deltaPct, cur_n, prev_n}
+function momCompare(values, days, opts={}){
+  const minReadings = opts.minReadings ?? 3;
+  const window = opts.window ?? 30;          // current window size in days
+  const prevWindow = opts.prevWindow ?? 30;  // previous window size in days
+  if (values.length < window + prevWindow) {
+    // Not enough history, fall back to whatever we have
+    const cur = values.slice(-window).filter(v => v!=null);
+    return {cur: cur.length ? avg(cur) : null, prev:null, delta:null, deltaPct:null, cur_n: cur.length, prev_n: 0};
+  }
+  const cur = values.slice(-window).filter(v => v!=null);
+  const prev = values.slice(-(window+prevWindow), -window).filter(v => v!=null);
+  if (cur.length < minReadings || prev.length < minReadings){
+    return {cur: cur.length?avg(cur):null, prev: prev.length?avg(prev):null, delta:null, deltaPct:null, cur_n: cur.length, prev_n: prev.length};
+  }
   const a = avg(cur), b = avg(prev);
-  return {cur:a, prev:b, delta:a-b, deltaPct: (a-b)/b*100};
+  return {cur:a, prev:b, delta:a-b, deltaPct: (a-b)/b*100, cur_n: cur.length, prev_n: prev.length};
+}
+
+// Find most recent non-null value with its date
+function lastReading(values, days){
+  for (let i = values.length-1; i >= 0; i--){
+    if (values[i] != null) return {value: values[i], day: days[i], daysAgo: values.length-1-i};
+  }
+  return {value: null, day: null, daysAgo: null};
 }
 
 function deltaPill(mom, lowerIsBetter=false, decimals=1, unit=''){
@@ -1355,9 +1405,12 @@ function renderCardio(panel){
   const whrAll = allDays.map(d => (S.daily.WalkingHeartRateAverage||{})[d]?.avg || null);
   const whrMoM = momCompare(whrAll, allDays);
 
-  // HR Recovery 1-min
+  // HR Recovery 1-min — sparse, only recorded after intense workouts. Use last reading.
   const hrr = allDays.map(d => (S.daily.HeartRateRecoveryOneMinute||{})[d]?.avg || null);
-  const hrrMoM = momCompare(hrr, allDays);
+  const hrrLast = lastReading(hrr, allDays);
+  const hrrSubtext = hrrLast.value != null
+    ? `last reading ${hrrLast.daysAgo===0?'today':hrrLast.daysAgo+'d ago'} · ${hrrLast.day}`
+    : 'no recovery data — recorded after intense workouts';
 
   // Zone 2 minutes from workouts: use workouts with avg HR proxy; we don't have HR series tied to workouts.
   // Approximation: HIIT/Running/Cycling/StairClimbing → assume avg HR derived from intensity rule;
@@ -1372,7 +1425,7 @@ function renderCardio(panel){
       ${metricCard('VO2 Max', fmt(vo2MoM.cur,1), 'mL/min·kg', deltaPill(vo2MoM, false, 1), 'Cardio fitness · higher = better')}
       ${metricCard('Resting HR', fmt(rhrMoM.cur,0), 'bpm', deltaPill(rhrMoM, true, 0), 'Lower = improving fitness')}
       ${metricCard('Walking HR', fmt(whrMoM.cur,0), 'bpm', deltaPill(whrMoM, true, 0), 'Avg HR during walking')}
-      ${metricCard('HRR (1 min)', fmt(hrrMoM.cur,0), 'bpm', deltaPill(hrrMoM, false, 0), 'Recovery after peak effort')}
+      ${metricCard('HRR (1 min)', fmt(hrrLast.value,0), 'bpm', '', hrrSubtext)}
     </div>
 
     <div class="grid cols-2 fade" style="margin-top:16px">
@@ -1389,7 +1442,7 @@ function renderCardio(panel){
     <div class="card spanning fade" style="margin-top:16px">
       <div class="card-head">
         <div class="card-title">Zone 2 minutes per week (estimated)</div>
-        <div class="meta-info">Heuristic from daily avg HR on workout days · HRmax ${HRMAX}</div>
+        <div class="meta-info">From peak HR on workout days · HRmax ${HRMAX}</div>
       </div>
       <div class="chart-wrap"><canvas id="ch-z2"></canvas></div>
       <div class="metric-sub" style="margin-top:8px">Z2 = 60–70% of HRmax (${Math.round(HRMAX*0.6)}–${Math.round(HRMAX*0.7)} bpm). Aim for ≥150 min/week of Z2 for aerobic base.</div>
@@ -1397,7 +1450,7 @@ function renderCardio(panel){
 
     <div class="grid cols-2 fade" style="margin-top:16px">
       <div class="card">
-        <div class="card-head"><div class="card-title">Workout HR distribution (rough)</div></div>
+        <div class="card-head"><div class="card-title">Workout intensity distribution · by peak HR</div></div>
         ${hrZoneBars(days)}
       </div>
       <div class="card">
@@ -1434,16 +1487,16 @@ function renderCardio(panel){
 }
 
 function computeZone2WeeklyMinutes(days){
-  // For each workout in range, if workout day has daily.HeartRate.avg in Z2 band → count workout minutes
+  // Use HR max on workout days to detect Z2 sessions
+  // A workout day with peak HR in Z2 band (60-70% HRmax) is a Z2 session
   const z2lo = HRMAX*0.6, z2hi = HRMAX*0.7;
-  const weekBuckets = {}; // YYYY-WW -> minutes
+  const weekBuckets = {};
   const ws = workoutsInRange();
   for (const w of ws){
-    const dayHr = (S.daily.HeartRate||{})[w.day]?.avg;
-    if (!dayHr) continue;
-    if (dayHr >= z2lo && dayHr <= z2hi){
+    const dayHrMax = (S.daily.HeartRate||{})[w.day]?.max;
+    if (!dayHrMax) continue;
+    if (dayHrMax >= z2lo && dayHrMax <= z2hi){
       const d = new Date(w.day+'T00:00:00');
-      // ISO week label
       const wk = isoWeek(d);
       weekBuckets[wk] = (weekBuckets[wk]||0) + (w.durationMin || 0);
     }
@@ -1452,7 +1505,6 @@ function computeZone2WeeklyMinutes(days){
   return {weekLabels: weekKeys, minutes: weekKeys.map(k => Math.round(weekBuckets[k]))};
 }
 function isoWeek(d){
-  // returns "YYYY-Www"
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const dow = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() + 4 - dow);
@@ -1462,12 +1514,12 @@ function isoWeek(d){
 }
 
 function hrZoneBars(days){
-  const z = [0,0,0,0,0]; // Z1..Z5 minutes (estimated)
+  const z = [0,0,0,0,0]; // Z1..Z5 minutes
   const ws = workoutsInRange();
   for (const w of ws){
-    const dayHr = (S.daily.HeartRate||{})[w.day]?.avg;
-    if (!dayHr || !w.durationMin) continue;
-    const p = dayHr/HRMAX;
+    const dayHrMax = (S.daily.HeartRate||{})[w.day]?.max;
+    if (!dayHrMax || !w.durationMin) continue;
+    const p = dayHrMax/HRMAX;
     let zone = 0;
     if (p < 0.6) zone = 0;
     else if (p < 0.7) zone = 1;
@@ -1485,7 +1537,7 @@ function hrZoneBars(days){
       <div class="zone-bar"><div class="zone-fill ${cls[i]}" style="width:${(v/total*100).toFixed(0)}%"></div></div>
       <span class="zone-val">${fmtInt(v)} m</span>
     </div>`).join('')}</div>
-  <div class="metric-sub" style="margin-top:14px">Estimated from daily mean HR on workout days. Each workout charged to its day's average zone.</div>`;
+  <div class="metric-sub" style="margin-top:14px">Estimated from peak HR on workout days, classifying each session by its day's peak intensity. Lower bound only — actual time-in-zone within a workout will be more distributed.</div>`;
 }
 
 // ============== BODY ==============
@@ -1498,10 +1550,12 @@ function renderBody(panel){
   const lbmAll = allDays.map(d => (S.daily.LeanBodyMass||{})[d]?.avg || null);
   const bmiAll = allDays.map(d => (S.daily.BodyMassIndex||{})[d]?.avg || null);
 
-  const wMoM = momCompare(wAll, allDays);
-  const bfMoM = momCompare(bfAll, allDays);
-  const lbmMoM = momCompare(lbmAll, allDays);
-  const bmiMoM = momCompare(bmiAll, allDays);
+  // Body metrics are sparse (weigh-ins every few days). Use wider windows: 30d vs prior 60d.
+  const sparseOpts = {window: 30, prevWindow: 60, minReadings: 2};
+  const wMoM = momCompare(wAll, allDays, sparseOpts);
+  const bfMoM = momCompare(bfAll, allDays, sparseOpts);
+  const lbmMoM = momCompare(lbmAll, allDays, sparseOpts);
+  const bmiMoM = momCompare(bmiAll, allDays, sparseOpts);
 
   // Active + Basal energy daily for TDEE estimate
   const actAll = allDays.map(d => (S.daily.ActiveEnergyBurned||{})[d]?.sum || null);
