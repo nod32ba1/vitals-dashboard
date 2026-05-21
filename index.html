@@ -1,0 +1,1782 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vitals — Personal Health Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0c0f0e;
+    --bg-2:#13171a;
+    --panel:#171b1d;
+    --panel-2:#1d2225;
+    --line:#262c30;
+    --line-2:#323a3f;
+    --ink:#e8eae5;
+    --ink-dim:#9aa0a0;
+    --ink-faint:#5a6164;
+    --accent:#c5f04a;    /* sharp lime */
+    --good:#7fd97a;
+    --warn:#f0c14a;
+    --bad:#ef6a6a;
+    --rec:#e8aaff;       /* recovery purple */
+    --card-r:18px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Inter Tight',system-ui,sans-serif;font-feature-settings:'ss01','cv11';-webkit-font-smoothing:antialiased}
+  body{min-height:100vh;background:
+    radial-gradient(1200px 600px at 90% -10%, rgba(197,240,74,0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(232,170,255,0.05), transparent 60%),
+    var(--bg);
+  }
+  .container{max-width:1480px;margin:0 auto;padding:32px 36px 80px}
+
+  /* ============== Header ============== */
+  header{display:flex;align-items:flex-end;justify-content:space-between;padding-bottom:28px;border-bottom:1px solid var(--line);margin-bottom:32px;gap:24px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{
+    width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#1d2225,#0c0f0e);
+    border:1px solid var(--line-2);display:grid;place-items:center;position:relative;overflow:hidden;
+  }
+  .logo::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 30% 30%,rgba(197,240,74,0.4),transparent 60%)}
+  .logo svg{position:relative;z-index:1}
+  h1{margin:0;font-family:'Fraunces',serif;font-weight:400;font-style:italic;font-size:36px;letter-spacing:-0.02em;line-height:1}
+  .sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.15em;margin-top:6px}
+
+  .header-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--line);
+    border-radius:999px;background:var(--panel);font-family:'JetBrains Mono',monospace;font-size:11px;
+    color:var(--ink-dim);text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;transition:all 0.15s
+  }
+  .pill:hover{border-color:var(--line-2);color:var(--ink)}
+  .pill.active{background:var(--accent);color:#0c0f0e;border-color:var(--accent);font-weight:600}
+  .pill.danger{color:var(--bad);border-color:rgba(239,106,106,0.3)}
+
+  /* ============== Upload ============== */
+  .empty{
+    margin:80px auto;max-width:680px;text-align:center;
+  }
+  .empty h2{font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:48px;margin:0 0 16px;line-height:1.05;letter-spacing:-0.025em}
+  .empty p{color:var(--ink-dim);margin:0 0 32px;font-size:15px;line-height:1.6}
+  .dropzone{
+    border:1.5px dashed var(--line-2);border-radius:24px;padding:56px 32px;
+    background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0)) ;
+    transition:all 0.2s;cursor:pointer;
+  }
+  .dropzone:hover, .dropzone.over{border-color:var(--accent);background:rgba(197,240,74,0.04)}
+  .dropzone-inner{display:flex;flex-direction:column;align-items:center;gap:18px}
+  .dz-icon{width:64px;height:64px;border-radius:18px;background:var(--panel-2);display:grid;place-items:center;border:1px solid var(--line)}
+  .dz-title{font-size:20px;font-family:'Fraunces',serif;font-style:italic;font-weight:400}
+  .dz-hint{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.15em}
+  input[type=file]{display:none}
+
+  .privacy{
+    margin-top:32px;padding:18px 22px;border-radius:14px;background:rgba(232,170,255,0.04);
+    border:1px solid rgba(232,170,255,0.15);font-size:13px;color:var(--ink-dim);line-height:1.6;text-align:left;
+  }
+  .privacy strong{color:var(--rec);font-weight:500}
+
+  /* ============== Progress ============== */
+  .progress-wrap{
+    position:fixed;inset:0;background:rgba(12,15,14,0.92);backdrop-filter:blur(10px);
+    display:none;align-items:center;justify-content:center;z-index:100;
+  }
+  .progress-wrap.show{display:flex}
+  .progress-card{
+    background:var(--panel);border:1px solid var(--line-2);border-radius:24px;padding:40px 48px;
+    width:min(520px,92vw);text-align:center;
+  }
+  .progress-card h3{font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:24px;margin:0 0 8px}
+  .progress-bar{height:6px;background:var(--bg-2);border-radius:999px;overflow:hidden;margin:24px 0 12px}
+  .progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--rec));width:0%;transition:width 0.3s ease;border-radius:999px}
+  .progress-meta{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.1em}
+
+  /* ============== Tabs ============== */
+  nav.tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);padding:5px;border-radius:14px;margin-bottom:28px;flex-wrap:wrap}
+  nav.tabs button{
+    flex:1;min-width:90px;border:0;background:transparent;color:var(--ink-dim);padding:11px 18px;border-radius:10px;
+    font-family:'Inter Tight',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s;letter-spacing:-0.005em
+  }
+  nav.tabs button:hover{color:var(--ink)}
+  nav.tabs button.active{background:var(--bg);color:var(--ink);box-shadow:0 1px 0 var(--line-2)}
+
+  /* ============== Grid + Card ============== */
+  .grid{display:grid;gap:16px}
+  .grid.cols-4{grid-template-columns:repeat(4,1fr)}
+  .grid.cols-3{grid-template-columns:repeat(3,1fr)}
+  .grid.cols-2{grid-template-columns:repeat(2,1fr)}
+  @media (max-width:1100px){.grid.cols-4{grid-template-columns:repeat(2,1fr)}.grid.cols-3{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:680px){.grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr}}
+
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--card-r);padding:22px;
+    position:relative;overflow:hidden;
+  }
+  .card.spanning{grid-column:1/-1}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:12px}
+  .card-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.18em;font-weight:500}
+  .card-icon{width:26px;height:26px;border-radius:8px;background:var(--panel-2);display:grid;place-items:center;border:1px solid var(--line)}
+
+  .metric-value{font-family:'Fraunces',serif;font-weight:400;font-size:44px;line-height:1;letter-spacing:-0.03em;display:flex;align-items:baseline;gap:8px}
+  .metric-value small{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-faint);font-weight:400;letter-spacing:0.05em}
+  .metric-delta{display:inline-flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:4px 9px;border-radius:6px;margin-top:10px;letter-spacing:0.02em}
+  .metric-delta.good{background:rgba(127,217,122,0.1);color:var(--good)}
+  .metric-delta.bad{background:rgba(239,106,106,0.1);color:var(--bad)}
+  .metric-delta.neutral{background:var(--bg-2);color:var(--ink-dim)}
+  .metric-sub{font-size:12px;color:var(--ink-faint);margin-top:10px;line-height:1.5}
+
+  /* sparkline */
+  .spark{margin-top:14px;height:48px}
+
+  /* ============== Recovery Score Hero ============== */
+  .hero-recovery{
+    background:linear-gradient(135deg,rgba(232,170,255,0.08),rgba(197,240,74,0.04));
+    border:1px solid rgba(232,170,255,0.2);
+    padding:32px;
+  }
+  .hero-recovery .left{display:flex;align-items:center;gap:36px}
+  .ring-wrap{position:relative;width:160px;height:160px;flex-shrink:0}
+  .ring-wrap svg{transform:rotate(-90deg)}
+  .ring-bg{fill:none;stroke:var(--bg-2);stroke-width:10}
+  .ring-fill{fill:none;stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset 1s ease}
+  .ring-label{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ring-num{font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:54px;line-height:1;letter-spacing:-0.03em}
+  .ring-cap{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.15em;margin-top:4px}
+
+  .hero-recovery .right{flex:1}
+  .hero-recovery h2{margin:0;font-family:'Fraunces',serif;font-weight:400;font-style:italic;font-size:32px;letter-spacing:-0.02em;line-height:1.1}
+  .hero-tag{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.15em;color:var(--ink-faint);margin-bottom:8px}
+  .hero-desc{color:var(--ink-dim);margin:12px 0 0;line-height:1.55;font-size:14px;max-width:520px}
+  .hero-factors{margin-top:20px;display:flex;gap:20px;flex-wrap:wrap}
+  .factor{display:flex;flex-direction:column;gap:3px}
+  .factor-label{font-family:'JetBrains Mono',monospace;font-size:9.5px;text-transform:uppercase;letter-spacing:0.12em;color:var(--ink-faint)}
+  .factor-val{font-family:'Fraunces',serif;font-size:18px;font-style:italic}
+  .factor-val .small{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--ink-faint);margin-left:4px;letter-spacing:0.05em}
+  @media (max-width:760px){.hero-recovery .left{flex-direction:column;gap:24px;align-items:flex-start}}
+
+  /* ============== Chart container ============== */
+  .chart-card{padding:22px}
+  .chart-card .card-title{margin-bottom:0}
+  .chart-wrap{position:relative;height:280px;margin-top:8px}
+  .chart-wrap.tall{height:340px}
+  .chart-controls{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{
+    font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 10px;border-radius:6px;
+    background:var(--bg-2);color:var(--ink-dim);border:1px solid var(--line);cursor:pointer;text-transform:uppercase;letter-spacing:0.08em
+  }
+  .chip.active{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+
+  /* HR zone bars */
+  .zones{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+  .zone{display:grid;grid-template-columns:80px 1fr 70px;align-items:center;gap:14px;font-size:13px}
+  .zone-name{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:0.08em}
+  .zone-bar{height:10px;background:var(--bg-2);border-radius:6px;overflow:hidden;position:relative}
+  .zone-fill{height:100%;border-radius:6px;transition:width 0.8s ease}
+  .zone-val{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-dim);text-align:right}
+  .z1{background:#4a90e2}.z2{background:#5fd0a8}.z3{background:#f0c14a}.z4{background:#f08c4a}.z5{background:#ef6a6a}
+
+  /* Sleep stages */
+  .sleep-stages{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+  .stage{padding:14px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line)}
+  .stage-name{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.1em}
+  .stage-val{font-family:'Fraunces',serif;font-size:24px;font-style:italic;margin-top:4px}
+  .stage-pct{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-dim);margin-top:2px}
+  .stage.deep .stage-val{color:var(--rec)}
+  .stage.rem .stage-val{color:var(--accent)}
+
+  /* PPL adherence */
+  .calendar{display:grid;grid-template-columns:repeat(53,1fr);gap:3px;margin-top:14px}
+  .cell{aspect-ratio:1;border-radius:2px;background:var(--bg-2)}
+  .cell.l1{background:rgba(197,240,74,0.2)}
+  .cell.l2{background:rgba(197,240,74,0.4)}
+  .cell.l3{background:rgba(197,240,74,0.6)}
+  .cell.l4{background:var(--accent)}
+
+  /* Workout table */
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  thead th{
+    text-align:left;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);
+    text-transform:uppercase;letter-spacing:0.12em;font-weight:500;padding:10px 12px;border-bottom:1px solid var(--line)
+  }
+  tbody td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--ink)}
+  tbody tr:hover{background:var(--bg-2)}
+  td.num{font-family:'JetBrains Mono',monospace;font-size:12px}
+
+  /* Toolbar above tabs */
+  .toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+  .range-controls{display:flex;gap:6px}
+  .meta-info{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.12em}
+
+  /* Footer */
+  footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.12em;text-align:center}
+
+  /* hide states */
+  .hidden{display:none !important}
+
+  /* fade-in */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .fade{animation:fadeUp 0.45s ease both}
+  .fade:nth-child(1){animation-delay:0.02s}
+  .fade:nth-child(2){animation-delay:0.05s}
+  .fade:nth-child(3){animation-delay:0.08s}
+  .fade:nth-child(4){animation-delay:0.11s}
+  .fade:nth-child(5){animation-delay:0.14s}
+  .fade:nth-child(6){animation-delay:0.17s}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="brand">
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c5f04a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12h4l2-5 4 10 2-5h6"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Vitals</h1>
+        <div class="sub">Personal Health Dashboard · Apple Health</div>
+      </div>
+    </div>
+    <div class="header-right" id="header-right">
+      <span id="data-meta" class="meta-info hidden"></span>
+      <label class="pill" id="upload-pill">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+        <span>Upload new export</span>
+        <input type="file" id="file-input" accept=".zip,.xml" />
+      </label>
+      <button class="pill danger hidden" id="clear-pill">Clear cache</button>
+    </div>
+  </header>
+
+  <!-- Empty state -->
+  <section id="empty-state" class="empty hidden">
+    <h2>Drop your Apple Health export to begin.</h2>
+    <p>From your iPhone: Health app → profile photo → Export All Health Data. Drop the resulting <code style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--panel-2);padding:2px 6px;border-radius:4px">export.zip</code> below.</p>
+    <label class="dropzone" id="dropzone" for="file-input-2">
+      <div class="dropzone-inner">
+        <div class="dz-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c5f04a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        </div>
+        <div class="dz-title">Drop export.zip or export.xml here</div>
+        <div class="dz-hint">or click to browse · processed in your browser</div>
+      </div>
+      <input type="file" id="file-input-2" accept=".zip,.xml" />
+    </label>
+    <div class="privacy">
+      <strong>100% local.</strong> Your data is parsed in your browser using a web worker and cached in IndexedDB on this device. Nothing is uploaded to any server. To clear, hit "Clear cache" or use your browser's site-data tools.
+    </div>
+  </section>
+
+  <!-- Progress modal -->
+  <div class="progress-wrap" id="progress">
+    <div class="progress-card">
+      <h3 id="progress-title">Parsing export…</h3>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-meta" id="progress-text">Initializing</div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <main id="dashboard" class="hidden">
+    <div class="toolbar">
+      <div class="range-controls" id="range-controls">
+        <button class="chip" data-range="30">30D</button>
+        <button class="chip active" data-range="90">90D</button>
+        <button class="chip" data-range="180">6M</button>
+        <button class="chip" data-range="365">1Y</button>
+        <button class="chip" data-range="all">ALL</button>
+      </div>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="active" data-tab="recovery">Recovery</button>
+      <button data-tab="cardio">Cardio</button>
+      <button data-tab="body">Body</button>
+      <button data-tab="training">Training</button>
+      <button data-tab="activity">Activity</button>
+      <button data-tab="environment">Environment</button>
+    </nav>
+
+    <section id="tab-recovery" class="tab-panel"></section>
+    <section id="tab-cardio" class="tab-panel hidden"></section>
+    <section id="tab-body" class="tab-panel hidden"></section>
+    <section id="tab-training" class="tab-panel hidden"></section>
+    <section id="tab-activity" class="tab-panel hidden"></section>
+    <section id="tab-environment" class="tab-panel hidden"></section>
+
+    <footer>Built locally in your browser · No data leaves this device</footer>
+  </main>
+</div>
+
+<!-- =========================================================
+     WORKER: streaming XML parser, runs off-main-thread
+     ========================================================= -->
+<script id="worker-src" type="javascript/worker">
+// Worker receives pre-decompressed XML bytes from main thread (which has JSZip loaded).
+// We slice the Uint8Array into chunks, decode + scan with regex.
+
+const CARES = new Set([
+  'HKQuantityTypeIdentifierHeartRate',
+  'HKQuantityTypeIdentifierRestingHeartRate',
+  'HKQuantityTypeIdentifierWalkingHeartRateAverage',
+  'HKQuantityTypeIdentifierHeartRateVariabilitySDNN',
+  'HKQuantityTypeIdentifierHeartRateRecoveryOneMinute',
+  'HKQuantityTypeIdentifierVO2Max',
+  'HKQuantityTypeIdentifierRespiratoryRate',
+  'HKQuantityTypeIdentifierStepCount',
+  'HKQuantityTypeIdentifierDistanceWalkingRunning',
+  'HKQuantityTypeIdentifierDistanceCycling',
+  'HKQuantityTypeIdentifierFlightsClimbed',
+  'HKQuantityTypeIdentifierActiveEnergyBurned',
+  'HKQuantityTypeIdentifierBasalEnergyBurned',
+  'HKQuantityTypeIdentifierAppleExerciseTime',
+  'HKQuantityTypeIdentifierAppleStandTime',
+  'HKQuantityTypeIdentifierBodyMass',
+  'HKQuantityTypeIdentifierBodyFatPercentage',
+  'HKQuantityTypeIdentifierLeanBodyMass',
+  'HKQuantityTypeIdentifierBodyMassIndex',
+  'HKQuantityTypeIdentifierHeight',
+  'HKQuantityTypeIdentifierTimeInDaylight',
+  'HKQuantityTypeIdentifierEnvironmentalAudioExposure',
+  'HKQuantityTypeIdentifierHeadphoneAudioExposure',
+  'HKCategoryTypeIdentifierSleepAnalysis',
+  'HKCategoryTypeIdentifierMindfulSession',
+]);
+
+const ATTR_RE = {
+  type: /\btype="([^"]+)"/,
+  value: /\bvalue="([^"]+)"/,
+  unit: /\bunit="([^"]+)"/,
+  sourceName: /\bsourceName="([^"]+)"/,
+  startDate: /\bstartDate="([^"]+)"/,
+  endDate: /\bendDate="([^"]+)"/,
+  workoutActivityType: /\bworkoutActivityType="([^"]+)"/,
+  duration: /\bduration="([^"]+)"/,
+  totalEnergyBurned: /\btotalEnergyBurned="([^"]+)"/,
+  totalDistance: /\btotalDistance="([^"]+)"/,
+  dateComponents: /\bdateComponents="([^"]+)"/,
+  activeEnergyBurned: /\bactiveEnergyBurned="([^"]+)"/,
+  appleExerciseTime: /\bappleExerciseTime="([^"]+)"/,
+  appleStandHours: /\bappleStandHours="([^"]+)"/,
+};
+
+// Parse "2024-05-19 11:14:28 +0800" to ms timestamp
+function parseAppleDate(s){
+  // "YYYY-MM-DD HH:MM:SS +HHMM"
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) ([+-]\d{4})$/);
+  if (!m) return null;
+  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7].slice(0,3)}:${m[7].slice(3)}`;
+  const t = Date.parse(iso);
+  return isNaN(t) ? null : t;
+}
+
+function dayKey(ts, tzOffsetMin){
+  // returns YYYY-MM-DD in user's local tz (we'll use HK +480)
+  const d = new Date(ts + tzOffsetMin*60000);
+  return d.toISOString().slice(0,10);
+}
+
+// Yield Uint8Array chunks of a single big Uint8Array, for streaming text decode
+function* chunkU8(u8, chunkSize = 4 * 1024 * 1024){
+  for (let i = 0; i < u8.length; i += chunkSize){
+    yield u8.subarray(i, Math.min(i + chunkSize, u8.length));
+  }
+}
+
+async function parseExport(payload){
+  // payload: { u8: Uint8Array (the XML bytes) }
+  const u8 = payload.u8;
+  const totalBytes = u8.length;
+  postMessage({type:'progress', pct: 25, text:'Scanning records…'});
+
+  const TZ_MIN = 480; // HK +08:00
+
+  // Daily aggregates
+  const daily = {};
+  function bump(type, day, value){
+    let m = daily[type]; if (!m){ m = daily[type] = {}; }
+    let r = m[day]; if (!r){ r = m[day] = {sum:0, count:0, min:Infinity, max:-Infinity}; }
+    r.sum += value; r.count += 1;
+    if (value < r.min) r.min = value;
+    if (value > r.max) r.max = value;
+  }
+
+  const sleepByNight = {};
+  function sleepNight(startMs){
+    const d = new Date(startMs + TZ_MIN*60000);
+    const hour = d.getUTCHours();
+    let dayDate;
+    if (hour < 18){
+      dayDate = new Date(d.getTime() - 86400000);
+    } else {
+      dayDate = d;
+    }
+    return dayDate.toISOString().slice(0,10);
+  }
+
+  const workouts = [];
+  const activity = {};
+  const tagRe = /<(Record|Workout|ActivitySummary)\b([^>]*)\/?>/g;
+
+  let firstSeenDate = null;
+  let lastSeenDate = null;
+
+  function processChunk(chunkStr){
+    let m;
+    tagRe.lastIndex = 0;
+    while ((m = tagRe.exec(chunkStr)) !== null){
+      const tag = m[1];
+      const attrs = m[2];
+
+      if (tag === 'Record'){
+        const tm = attrs.match(ATTR_RE.type);
+        if (!tm) continue;
+        const type = tm[1];
+        if (!CARES.has(type)) continue;
+        const sm = attrs.match(ATTR_RE.startDate);
+        if (!sm) continue;
+        const startMs = parseAppleDate(sm[1]);
+        if (!startMs) continue;
+
+        if (type === 'HKCategoryTypeIdentifierSleepAnalysis'){
+          const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
+          const endMs = parseAppleDate(em[1]); if (!endMs) continue;
+          const vm = attrs.match(ATTR_RE.value); const stage = vm ? vm[1] : '';
+          const night = sleepNight(startMs);
+          if (!sleepByNight[night]) sleepByNight[night] = {inBed:0, asleep:0, deep:0, rem:0, core:0, awake:0, unspec:0, startEarliest:Infinity, endLatest:-Infinity};
+          const dur = Math.max(0, (endMs - startMs)/1000);
+          const r = sleepByNight[night];
+          if (stage === 'HKCategoryValueSleepAnalysisInBed') r.inBed += dur;
+          else if (stage === 'HKCategoryValueSleepAnalysisAwake') { r.awake += dur; }
+          else if (stage === 'HKCategoryValueSleepAnalysisAsleepDeep'){ r.deep += dur; r.asleep += dur; }
+          else if (stage === 'HKCategoryValueSleepAnalysisAsleepREM'){ r.rem += dur; r.asleep += dur; }
+          else if (stage === 'HKCategoryValueSleepAnalysisAsleepCore'){ r.core += dur; r.asleep += dur; }
+          else if (stage === 'HKCategoryValueSleepAnalysisAsleepUnspecified'){ r.unspec += dur; r.asleep += dur; }
+          if (startMs < r.startEarliest) r.startEarliest = startMs;
+          if (endMs > r.endLatest) r.endLatest = endMs;
+          continue;
+        }
+
+        if (type === 'HKCategoryTypeIdentifierMindfulSession'){
+          const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
+          const endMs = parseAppleDate(em[1]); if (!endMs) continue;
+          const day = dayKey(startMs, TZ_MIN);
+          bump('MindfulMinutes', day, (endMs-startMs)/60000);
+          continue;
+        }
+
+        const vm = attrs.match(ATTR_RE.value); if (!vm) continue;
+        const value = parseFloat(vm[1]);
+        if (isNaN(value)) continue;
+        const day = dayKey(startMs, TZ_MIN);
+
+        if (firstSeenDate === null || day < firstSeenDate) firstSeenDate = day;
+        if (lastSeenDate === null || day > lastSeenDate) lastSeenDate = day;
+
+        let v = value;
+        const unit = (attrs.match(ATTR_RE.unit) || [])[1] || '';
+        const short = type.replace('HKQuantityTypeIdentifier','').replace('HKCategoryTypeIdentifier','');
+        if (short === 'BodyMass' || short === 'LeanBodyMass'){
+          if (unit === 'lb') v = value * 0.45359237;
+        } else if (short === 'BodyFatPercentage'){
+          if (value < 1.5) v = value * 100;
+        } else if (short === 'Height'){
+          if (unit === 'ft') v = value * 30.48;
+          else if (unit === 'in') v = value * 2.54;
+        }
+        bump(short, day, v);
+
+      } else if (tag === 'Workout'){
+        const wm = attrs.match(ATTR_RE.workoutActivityType); if (!wm) continue;
+        const sm = attrs.match(ATTR_RE.startDate); if (!sm) continue;
+        const em = attrs.match(ATTR_RE.endDate);
+        const startMs = parseAppleDate(sm[1]);
+        const endMs = em ? parseAppleDate(em[1]) : null;
+        const dur = parseFloat((attrs.match(ATTR_RE.duration) || [])[1] || '0');
+        const energy = parseFloat((attrs.match(ATTR_RE.totalEnergyBurned) || [])[1] || '0');
+        const dist = parseFloat((attrs.match(ATTR_RE.totalDistance) || [])[1] || '0');
+        workouts.push({
+          type: wm[1].replace('HKWorkoutActivityType',''),
+          start: startMs, end: endMs,
+          durationMin: dur, energy, distance: dist,
+          day: dayKey(startMs, TZ_MIN)
+        });
+      } else if (tag === 'ActivitySummary'){
+        const dc = (attrs.match(ATTR_RE.dateComponents) || [])[1];
+        if (!dc) continue;
+        const ae = parseFloat((attrs.match(ATTR_RE.activeEnergyBurned) || [])[1] || '0');
+        const ex = parseFloat((attrs.match(ATTR_RE.appleExerciseTime) || [])[1] || '0');
+        const sh = parseFloat((attrs.match(ATTR_RE.appleStandHours) || [])[1] || '0');
+        activity[dc] = {active: ae, exercise: ex, standH: sh};
+      }
+    }
+  }
+
+  // Stream-decode chunks, keep a tail buffer to avoid splitting tags
+  const decoder = new TextDecoder('utf-8');
+  let carry = '';
+  let bytesRead = 0;
+  let lastProgressAt = 0;
+
+  for (const chunk of chunkU8(u8)){
+    bytesRead += chunk.length;
+    const text = carry + decoder.decode(chunk, {stream:true});
+    const lastClose = text.lastIndexOf('>');
+    if (lastClose === -1){
+      carry = text;
+      continue;
+    }
+    const processable = text.slice(0, lastClose+1);
+    carry = text.slice(lastClose+1);
+    processChunk(processable);
+
+    const now = Date.now();
+    if (now - lastProgressAt > 150){
+      lastProgressAt = now;
+      const ratio = bytesRead / totalBytes;
+      const pct = 25 + Math.round(ratio * 65);
+      postMessage({type:'progress', pct: Math.min(pct, 90), text: `Scanning… ${(bytesRead/1_000_000).toFixed(0)} MB / ${(totalBytes/1_000_000).toFixed(0)} MB`});
+    }
+  }
+  carry += decoder.decode();
+  if (carry) processChunk(carry);
+
+  postMessage({type:'progress', pct: 95, text:'Building summaries…'});
+
+  // Compute daily averages from sum/count
+  const dailyAvg = {};
+  for (const t in daily){
+    const m = daily[t];
+    const out = {};
+    for (const day in m){
+      const r = m[day];
+      out[day] = {avg: r.sum/r.count, sum: r.sum, count: r.count, min: r.min, max: r.max};
+    }
+    dailyAvg[t] = out;
+  }
+
+  // Convert sleep -> per-night object with hours
+  const sleep = {};
+  for (const n in sleepByNight){
+    const r = sleepByNight[n];
+    sleep[n] = {
+      inBedH: r.inBed/3600,
+      asleepH: r.asleep/3600,
+      deepH: r.deep/3600,
+      remH: r.rem/3600,
+      coreH: r.core/3600,
+      awakeH: r.awake/3600,
+      unspecH: r.unspec/3600,
+      bedtime: isFinite(r.startEarliest) ? r.startEarliest : null,
+      wakeTime: isFinite(r.endLatest) ? r.endLatest : null,
+    };
+  }
+
+  const summary = {
+    builtAt: Date.now(),
+    firstDate: firstSeenDate,
+    lastDate: lastSeenDate,
+    daily: dailyAvg,
+    sleep,
+    workouts,
+    activity,
+    workoutCount: workouts.length,
+  };
+
+  postMessage({type:'done', summary});
+}
+
+self.onmessage = async (e) => {
+  if (e.data.type === 'parse'){
+    try {
+      await parseExport(e.data);
+    } catch(err){
+      postMessage({type:'error', message: (err && err.message) ? err.message : String(err), stack: err && err.stack});
+    }
+  }
+};
+
+self.addEventListener('error', (ev) => {
+  postMessage({type:'error', message: ev.message + ' at ' + ev.filename + ':' + ev.lineno + ':' + ev.colno});
+  ev.preventDefault();
+});
+self.addEventListener('unhandledrejection', (ev) => {
+  const r = ev.reason;
+  postMessage({type:'error', message: 'unhandledrejection: ' + (r && r.message ? r.message : String(r)), stack: r && r.stack});
+  ev.preventDefault();
+});
+</script>
+
+<!-- =========================================================
+     MAIN APP
+     ========================================================= -->
+<script>
+// ---------- Utility ----------
+function $(sel, root=document){ return root.querySelector(sel); }
+function $$(sel, root=document){ return [...root.querySelectorAll(sel)]; }
+function fmt(n, digits=1){ if (n===null||n===undefined||isNaN(n)) return '—'; if (Math.abs(n) >= 1000) return n.toLocaleString(undefined, {maximumFractionDigits:0}); return Number(n).toFixed(digits); }
+function fmtInt(n){ if (n===null||n===undefined||isNaN(n)) return '—'; return Math.round(n).toLocaleString(); }
+function fmtPct(n, d=1){ if (n===null||n===undefined||isNaN(n)) return '—'; return Number(n).toFixed(d)+'%'; }
+function fmtH(h){ if (h===null||h===undefined||isNaN(h)) return '—'; const hh=Math.floor(h); const mm=Math.round((h-hh)*60); return `${hh}h ${String(mm).padStart(2,'0')}m`; }
+function ageYears(dobStr){
+  const dob = new Date(dobStr+'T00:00:00');
+  return (Date.now() - dob.getTime()) / (365.25*24*3600*1000);
+}
+function dayList(start, end){
+  // strings YYYY-MM-DD inclusive
+  const out = [];
+  let d = new Date(start+'T00:00:00');
+  const stop = new Date(end+'T00:00:00');
+  while (d <= stop){
+    out.push(d.toISOString().slice(0,10));
+    d.setUTCDate(d.getUTCDate()+1);
+  }
+  return out;
+}
+function avg(arr){ if (!arr.length) return null; return arr.reduce((a,b)=>a+b,0)/arr.length; }
+function median(arr){ if (!arr.length) return null; const s=[...arr].sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+function stdev(arr){ if (arr.length<2) return null; const m=avg(arr); return Math.sqrt(avg(arr.map(x=>(x-m)**2))); }
+function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+
+const DOB = '2000-09-24';
+const HRMAX = Math.round(220 - ageYears(DOB)); // ~195
+
+// ---------- IndexedDB cache ----------
+const DB_NAME = 'vitalsdb';
+const STORE = 'summary';
+function openDB(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbSet(key, val){
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(val, key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function dbGet(key){
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const r = tx.objectStore(STORE).get(key);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbClear(){
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).clear();
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+
+// ---------- Worker ----------
+async function startParse(file){
+  // Step 1 — main thread decompresses zip (JSZip is loaded here) and yields a Uint8Array of XML.
+  let u8;
+  if (/\.zip$/i.test(file.name)){
+    $('#progress-text').textContent = 'Opening zip…';
+    $('#progress-fill').style.width = '3%';
+    const zip = await JSZip.loadAsync(file);
+    let xmlEntry = null;
+    zip.forEach((path, entry) => {
+      const p = path.toLowerCase();
+      if (p.endsWith('export.xml') && !p.includes('cda')) xmlEntry = entry;
+    });
+    if (!xmlEntry){
+      zip.forEach((path, entry) => {
+        const p = path.toLowerCase();
+        if (p.endsWith('.xml') && !p.includes('cda') && !xmlEntry) xmlEntry = entry;
+      });
+    }
+    if (!xmlEntry) throw new Error('export.xml not found inside zip');
+    $('#progress-text').textContent = 'Decompressing XML…';
+    u8 = await xmlEntry.async('uint8array', (meta) => {
+      const pct = 3 + Math.round(meta.percent * 0.20);
+      $('#progress-fill').style.width = pct + '%';
+      $('#progress-text').textContent = `Decompressing XML… ${Math.round(meta.percent)}%`;
+    });
+  } else if (/\.xml$/i.test(file.name)){
+    $('#progress-text').textContent = 'Reading XML…';
+    $('#progress-fill').style.width = '5%';
+    const buf = await file.arrayBuffer();
+    u8 = new Uint8Array(buf);
+  } else {
+    throw new Error('Unsupported file type — please upload export.zip or export.xml');
+  }
+
+  // Step 2 — spawn worker and transfer the Uint8Array.
+  return new Promise((resolve, reject) => {
+    const src = $('#worker-src').textContent;
+    const blob = new Blob([src], {type:'application/javascript'});
+    const worker = new Worker(URL.createObjectURL(blob));
+    worker.onmessage = (e) => {
+      const d = e.data;
+      if (d.type === 'progress'){
+        $('#progress-fill').style.width = d.pct + '%';
+        $('#progress-text').textContent = d.text;
+      } else if (d.type === 'done'){
+        worker.terminate();
+        resolve(d.summary);
+      } else if (d.type === 'error'){
+        worker.terminate();
+        const err = new Error(d.message || 'Worker error');
+        if (d.stack) err.stack = d.stack;
+        reject(err);
+      }
+    };
+    worker.onerror = (e) => {
+      worker.terminate();
+      const msg = e && (e.message || e.filename) ? `${e.message || ''} (${e.filename || ''}:${e.lineno || '?'}:${e.colno || '?'})` : 'Unknown worker error';
+      reject(new Error('Worker crash: ' + msg));
+    };
+    worker.onmessageerror = (e) => {
+      worker.terminate();
+      reject(new Error('Worker messageerror: failed to deserialize message'));
+    };
+    // Transfer the buffer so we don't copy 1.5GB
+    worker.postMessage({type:'parse', u8}, [u8.buffer]);
+  });
+}
+
+// ---------- State ----------
+let S = null;             // summary
+let currentRangeDays = 90;
+let currentTab = 'recovery';
+let charts = {}; // chart instances by id
+
+// ---------- Boot ----------
+init();
+
+async function init(){
+  setupUploadHandlers();
+  setupTabs();
+  setupRangeControls();
+  $('#clear-pill').addEventListener('click', async () => {
+    if (confirm('Delete cached health data from this browser?')){
+      await dbClear();
+      location.reload();
+    }
+  });
+
+  // Try load cache
+  const cached = await dbGet('latest');
+  if (cached){
+    S = cached;
+    showDashboard();
+  } else {
+    $('#empty-state').classList.remove('hidden');
+  }
+}
+
+function setupUploadHandlers(){
+  const fi = $('#file-input');
+  const fi2 = $('#file-input-2');
+  const dz = $('#dropzone');
+
+  fi.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  fi2.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+  dz.addEventListener('drop', e => { if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+
+  // also accept drop on entire body once dashboard is shown
+  document.body.addEventListener('dragover', e => e.preventDefault());
+  document.body.addEventListener('drop', e => {
+    if (e.target.closest('#dropzone')) return; // handled above
+    e.preventDefault();
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+}
+
+async function handleFile(file){
+  if (!/\.(zip|xml)$/i.test(file.name)){ alert('Please upload export.zip or export.xml'); return; }
+  $('#progress').classList.add('show');
+  $('#progress-fill').style.width = '0%';
+  $('#progress-text').textContent = 'Initializing…';
+  try {
+    const summary = await startParse(file);
+    S = summary;
+    await dbSet('latest', summary);
+    $('#progress').classList.remove('show');
+    showDashboard();
+  } catch (err){
+    console.error('Parse failed:', err);
+    if (err && err.stack) console.error(err.stack);
+    $('#progress').classList.remove('show');
+    alert('Failed to parse: ' + (err.message || err) + '\n\nSee browser console for full stack trace.');
+  }
+}
+
+function showDashboard(){
+  $('#empty-state').classList.add('hidden');
+  $('#dashboard').classList.remove('hidden');
+  $('#clear-pill').classList.remove('hidden');
+  $('#data-meta').classList.remove('hidden');
+  $('#data-meta').textContent = `${S.firstDate} → ${S.lastDate} · ${S.workoutCount} workouts`;
+  render();
+}
+
+function setupTabs(){
+  $$('#tabs button').forEach(b => b.addEventListener('click', () => {
+    $$('#tabs button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentTab = b.dataset.tab;
+    $$('.tab-panel').forEach(p => p.classList.add('hidden'));
+    $('#tab-'+currentTab).classList.remove('hidden');
+    render();
+  }));
+}
+
+function setupRangeControls(){
+  $$('#range-controls .chip').forEach(b => b.addEventListener('click', () => {
+    $$('#range-controls .chip').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentRangeDays = b.dataset.range === 'all' ? 'all' : Number(b.dataset.range);
+    render();
+  }));
+}
+
+// ---------- Derived helpers over S ----------
+function rangeDays(){
+  if (!S) return [];
+  const last = S.lastDate;
+  if (currentRangeDays === 'all') return dayList(S.firstDate, S.lastDate);
+  const end = new Date(last+'T00:00:00');
+  const start = new Date(end.getTime() - (currentRangeDays-1)*86400000);
+  return dayList(start.toISOString().slice(0,10), last);
+}
+
+function seriesFromDaily(type, stat='avg'){
+  const days = rangeDays();
+  const m = S.daily[type] || {};
+  return days.map(d => m[d] ? m[d][stat] : null);
+}
+
+function rollingMean(arr, win){
+  const out = new Array(arr.length).fill(null);
+  let sum = 0, n = 0;
+  const q = [];
+  for (let i=0;i<arr.length;i++){
+    const v = arr[i];
+    if (v != null){ q.push(v); sum += v; n++; }
+    else q.push(null);
+    if (q.length > win){
+      const old = q.shift();
+      if (old != null){ sum -= old; n--; }
+    }
+    out[i] = n > 0 ? sum/n : null;
+  }
+  return out;
+}
+
+// month-over-month delta of mean: returns {curMean, prevMean, delta, deltaPct}
+function momCompare(values, days){
+  // last 30 days vs prior 30 days
+  if (values.length < 31) return {cur:null, prev:null, delta:null, deltaPct:null};
+  const cur = values.slice(-30).filter(v => v!=null);
+  const prev = values.slice(-60, -30).filter(v => v!=null);
+  if (cur.length < 5 || prev.length < 5) return {cur: cur.length?avg(cur):null, prev: prev.length?avg(prev):null, delta:null, deltaPct:null};
+  const a = avg(cur), b = avg(prev);
+  return {cur:a, prev:b, delta:a-b, deltaPct: (a-b)/b*100};
+}
+
+function deltaPill(mom, lowerIsBetter=false, decimals=1, unit=''){
+  if (mom.delta == null) return '<span class="metric-delta neutral">— vs prior 30d</span>';
+  const arrowUp = '↑', arrowDn = '↓';
+  const arrow = mom.delta >= 0 ? arrowUp : arrowDn;
+  const improving = lowerIsBetter ? mom.delta < 0 : mom.delta > 0;
+  const cls = Math.abs(mom.deltaPct) < 1 ? 'neutral' : (improving ? 'good' : 'bad');
+  const sign = mom.delta>=0?'+':'';
+  return `<span class="metric-delta ${cls}">${arrow} ${sign}${fmt(mom.delta, decimals)}${unit} <span style="opacity:0.7;margin-left:4px">(${sign}${fmt(mom.deltaPct,1)}%)</span></span>`;
+}
+
+// HR zones for workouts in range
+function hrZones(){
+  // We need per-second HR. We have daily averages of HR — but for zones, we need full HR series.
+  // Simplification: workouts have a duration; we use daily avg HR as a proxy is poor.
+  // Better proxy: count of HR records in each day's daily.HeartRate.min/max/avg won't give zone time.
+  // For a meaningful zones view, we'd need raw HR samples. We don't store all 695k samples.
+  // Fallback: compute proportion of workout time by workout type's typical zone.
+  return null;
+}
+
+// Sleep helpers
+function sleepDays(){
+  const days = rangeDays();
+  return days.map(d => ({ day:d, ...(S.sleep[d] || {})}));
+}
+
+// Workouts in range
+function workoutsInRange(){
+  const days = new Set(rangeDays());
+  return S.workouts.filter(w => days.has(w.day));
+}
+
+// ---------- Recovery score ----------
+function computeRecoveryScore(){
+  // Composite of last night's sleep, HRV vs 30d baseline, RHR vs 30d baseline.
+  const lastDay = S.lastDate;
+  // most recent sleep night
+  const sleepNights = Object.keys(S.sleep).sort();
+  let lastNight = null;
+  for (let i=sleepNights.length-1;i>=0;i--){
+    if (S.sleep[sleepNights[i]].asleepH > 1){ lastNight = sleepNights[i]; break; }
+  }
+  const sleepRec = lastNight ? S.sleep[lastNight] : null;
+
+  // sleep score: efficiency + duration (target 7.5h)
+  let sleepScore = 50;
+  if (sleepRec){
+    const tib = sleepRec.inBedH > 0 ? sleepRec.inBedH : (sleepRec.asleepH + sleepRec.awakeH);
+    const eff = tib > 0 ? sleepRec.asleepH/tib : null;
+    const dur = sleepRec.asleepH;
+    const effScore = eff != null ? clamp((eff-0.6)/(0.95-0.6),0,1)*50 : 25;  // 0-50
+    const durScore = clamp(dur/7.5, 0, 1) * 50; // 0-50, cap at 7.5h target
+    sleepScore = effScore + durScore;
+  }
+
+  // HRV: recent 7d vs 30-90d baseline
+  function recentVsBaseline(typeKey){
+    const days = dayList(S.firstDate, S.lastDate);
+    const m = S.daily[typeKey] || {};
+    const vals = days.map(d => m[d] ? m[d].avg : null);
+    const cleanVals = vals.filter(v => v != null);
+    if (cleanVals.length < 14) return null;
+    const recent = vals.slice(-7).filter(v => v != null);
+    const baseline = vals.slice(-90, -7).filter(v => v != null);
+    if (recent.length < 3 || baseline.length < 10) return null;
+    return {recent: avg(recent), baseline: avg(baseline)};
+  }
+
+  const hrvCmp = recentVsBaseline('HeartRateVariabilitySDNN');
+  const rhrCmp = recentVsBaseline('RestingHeartRate');
+
+  // HRV score: positive deviation good
+  let hrvScore = 50;
+  if (hrvCmp){
+    const pct = (hrvCmp.recent - hrvCmp.baseline)/hrvCmp.baseline;
+    hrvScore = clamp(50 + pct*200, 0, 100); // +25% HRV = 100; -25% = 0
+  }
+  // RHR score: lower better
+  let rhrScore = 50;
+  if (rhrCmp){
+    const pct = (rhrCmp.recent - rhrCmp.baseline)/rhrCmp.baseline;
+    rhrScore = clamp(50 - pct*250, 0, 100); // +20% RHR -> 0
+  }
+
+  const total = Math.round(sleepScore*0.4 + hrvScore*0.35 + rhrScore*0.25);
+
+  let label = 'Optimal';
+  let color = 'var(--good)';
+  if (total < 35){ label = 'Strained'; color = 'var(--bad)'; }
+  else if (total < 60){ label = 'Recovering'; color = 'var(--warn)'; }
+  else if (total < 80){ label = 'Ready'; color = 'var(--accent)'; }
+  else { label = 'Peaked'; color = 'var(--rec)'; }
+
+  return {
+    total, label, color,
+    factors:{
+      sleep: {score: Math.round(sleepScore), data: sleepRec, night: lastNight},
+      hrv: {score: Math.round(hrvScore), data: hrvCmp},
+      rhr: {score: Math.round(rhrScore), data: rhrCmp},
+    }
+  };
+}
+
+// ---------- Chart factory ----------
+const chartDefaults = {
+  responsive:true, maintainAspectRatio:false,
+  plugins:{ legend:{display:false}, tooltip:{
+    backgroundColor:'#13171a', borderColor:'#323a3f', borderWidth:1, padding:10,
+    titleFont:{family:'JetBrains Mono', size:10}, titleColor:'#9aa0a0',
+    bodyFont:{family:'Inter Tight', size:13}, bodyColor:'#e8eae5',
+    displayColors:false
+  }},
+  scales:{
+    x:{ grid:{display:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}, maxRotation:0, autoSkipPadding:20} },
+    y:{ grid:{color:'#1d2225', drawBorder:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}, beginAtZero:false }
+  },
+  elements:{ point:{radius:0, hoverRadius:4}, line:{tension:0.3, borderWidth:2}}
+};
+
+function makeChart(canvas, days, datasets, opts={}){
+  const id = canvas.id || ('c' + Math.random().toString(36).slice(2));
+  canvas.id = id;
+  if (charts[id]) charts[id].destroy();
+  const labels = days.map(d => {
+    // Show only month abbreviations sparsely
+    const [y,m,dd] = d.split('-');
+    return `${dd}/${m}`;
+  });
+  const cfg = { type:'line', data:{labels, datasets}, options: structuredClone(chartDefaults) };
+  Object.assign(cfg.options, opts);
+  charts[id] = new Chart(canvas, cfg);
+  return charts[id];
+}
+
+function destroyChartsInPanel(panel){
+  $$('canvas', panel).forEach(c => { if (c.id && charts[c.id]){ charts[c.id].destroy(); delete charts[c.id]; }});
+}
+
+// ---------- Render ----------
+function render(){
+  const tab = currentTab;
+  const panel = $('#tab-'+tab);
+  destroyChartsInPanel(panel);
+  if (tab === 'recovery') renderRecovery(panel);
+  else if (tab === 'cardio') renderCardio(panel);
+  else if (tab === 'body') renderBody(panel);
+  else if (tab === 'training') renderTraining(panel);
+  else if (tab === 'activity') renderActivity(panel);
+  else if (tab === 'environment') renderEnvironment(panel);
+}
+
+// ============== RECOVERY ==============
+function renderRecovery(panel){
+  const days = rangeDays();
+  const rec = computeRecoveryScore();
+
+  // Score ring math
+  const C = 2*Math.PI*70;
+  const off = C * (1 - rec.total/100);
+
+  // Last night sleep
+  const ln = rec.factors.sleep;
+  const tib = ln.data ? (ln.data.inBedH > 0 ? ln.data.inBedH : ln.data.asleepH + ln.data.awakeH) : 0;
+  const eff = ln.data && tib > 0 ? (ln.data.asleepH/tib)*100 : null;
+  const lnDateStr = ln.night ? new Date(ln.night+'T00:00:00').toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'}) : '—';
+
+  // MoM series
+  const allDays = dayList(S.firstDate, S.lastDate);
+  const hrvAll = allDays.map(d => (S.daily.HeartRateVariabilitySDNN||{})[d]?.avg || null);
+  const rhrAll = allDays.map(d => (S.daily.RestingHeartRate||{})[d]?.avg || null);
+  const hrvMoM = momCompare(hrvAll, allDays);
+  const rhrMoM = momCompare(rhrAll, allDays);
+
+  // Sleep MoM (asleep hours)
+  const sleepDur = allDays.map(d => S.sleep[d]?.asleepH || null);
+  const sleepMoM = momCompare(sleepDur, allDays);
+
+  // Range-bound series for charts
+  const hrvSeries = seriesFromDaily('HeartRateVariabilitySDNN');
+  const rhrSeries = seriesFromDaily('RestingHeartRate');
+  const sleepSeries = days.map(d => S.sleep[d]?.asleepH || null);
+  const hrvBaseline = rollingMean(hrvSeries, 30);
+  const rhrBaseline = rollingMean(rhrSeries, 30);
+
+  panel.innerHTML = `
+    <div class="card hero-recovery spanning fade" style="display:flex;align-items:center;gap:36px;flex-wrap:wrap">
+      <div class="left">
+        <div class="ring-wrap">
+          <svg width="160" height="160" viewBox="0 0 160 160">
+            <circle class="ring-bg" cx="80" cy="80" r="70"/>
+            <circle class="ring-fill" cx="80" cy="80" r="70" stroke="${rec.color}" stroke-dasharray="${C}" stroke-dashoffset="${off}"/>
+          </svg>
+          <div class="ring-label">
+            <div class="ring-num">${rec.total}</div>
+            <div class="ring-cap">Recovery Score</div>
+          </div>
+        </div>
+        <div class="right">
+          <div class="hero-tag">Today's Status · ${lnDateStr}</div>
+          <h2 style="color:${rec.color}">${rec.label}</h2>
+          <p class="hero-desc">${recoveryNarrative(rec)}</p>
+          <div class="hero-factors">
+            <div class="factor"><span class="factor-label">HRV vs baseline</span><span class="factor-val">${hrvDeltaText(rec.factors.hrv)}</span></div>
+            <div class="factor"><span class="factor-label">RHR vs baseline</span><span class="factor-val">${rhrDeltaText(rec.factors.rhr)}</span></div>
+            <div class="factor"><span class="factor-label">Last night sleep</span><span class="factor-val">${ln.data ? fmtH(ln.data.asleepH) : '—'}<span class="small">${eff!=null?'• '+fmt(eff,0)+'% eff':''}</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-top:16px">
+      ${metricCard('HRV (SDNN)', fmt(hrvMoM.cur,1), 'ms', deltaPill(hrvMoM, false, 1, ' ms'), 'Heart rate variability — higher = better recovery')}
+      ${metricCard('Resting HR', fmt(rhrMoM.cur,0), 'bpm', deltaPill(rhrMoM, true, 0, ' bpm'), 'Lower = improving aerobic fitness')}
+      ${metricCard('Sleep (avg)', fmtH(sleepMoM.cur), '', deltaPill(sleepMoM, false, 2, 'h'), '7d avg of asleep duration')}
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">HRV trend · 30d rolling baseline</div></div>
+        <div class="chart-wrap"><canvas id="ch-hrv"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Resting HR · 30d rolling baseline</div></div>
+        <div class="chart-wrap"><canvas id="ch-rhr"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card chart-card spanning fade" style="margin-top:16px">
+      <div class="card-head">
+        <div class="card-title">Sleep duration & stages · ${rangeLabel()}</div>
+        <div class="meta-info">stack of stages, line = total asleep</div>
+      </div>
+      <div class="chart-wrap tall"><canvas id="ch-sleep"></canvas></div>
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">Sleep architecture (avg ${rangeLabel()})</div></div>
+        ${sleepStagesBlock(days)}
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">Sleep consistency</div></div>
+        ${sleepConsistencyBlock(days)}
+      </div>
+    </div>
+  `;
+
+  // HRV chart
+  makeChart($('#ch-hrv'), days, [
+    {label:'HRV', data: hrvSeries, borderColor:'rgba(232,170,255,0.95)', backgroundColor:'rgba(232,170,255,0.08)', fill:true},
+    {label:'30d baseline', data: hrvBaseline, borderColor:'rgba(232,170,255,0.4)', borderDash:[5,4], pointRadius:0}
+  ]);
+  // RHR chart
+  makeChart($('#ch-rhr'), days, [
+    {label:'RHR', data: rhrSeries, borderColor:'rgba(127,217,122,0.95)', backgroundColor:'rgba(127,217,122,0.07)', fill:true},
+    {label:'30d baseline', data: rhrBaseline, borderColor:'rgba(127,217,122,0.4)', borderDash:[5,4], pointRadius:0}
+  ]);
+
+  // Sleep stacked
+  const deep = days.map(d => S.sleep[d]?.deepH || 0);
+  const rem = days.map(d => S.sleep[d]?.remH || 0);
+  const core = days.map(d => S.sleep[d]?.coreH || 0);
+  const sleepTotal = days.map(d => S.sleep[d]?.asleepH || null);
+
+  const ch = makeChart($('#ch-sleep'), days, [
+    {type:'bar', label:'Deep', data:deep, backgroundColor:'rgba(232,170,255,0.85)', stack:'s', borderRadius:0, barPercentage:1, categoryPercentage:0.9},
+    {type:'bar', label:'REM', data:rem, backgroundColor:'rgba(197,240,74,0.7)', stack:'s', borderRadius:0, barPercentage:1, categoryPercentage:0.9},
+    {type:'bar', label:'Core', data:core, backgroundColor:'rgba(154,160,160,0.5)', stack:'s', borderRadius:0, barPercentage:1, categoryPercentage:0.9},
+  ], {scales:{
+      x:{stacked:true, grid:{display:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}, maxRotation:0, autoSkipPadding:20}},
+      y:{stacked:true, grid:{color:'#1d2225'}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}, title:{display:true, text:'hours', color:'#5a6164', font:{family:'JetBrains Mono', size:10}}}
+    }, plugins:{legend:{display:true, position:'top', align:'end', labels:{color:'#9aa0a0', font:{family:'JetBrains Mono', size:10}, boxWidth:10, boxHeight:10}}, tooltip:chartDefaults.plugins.tooltip}});
+}
+
+function recoveryNarrative(rec){
+  const bits = [];
+  if (rec.factors.sleep.data){
+    if (rec.factors.sleep.data.asleepH < 6) bits.push('short sleep last night');
+    else if (rec.factors.sleep.data.asleepH >= 7.5) bits.push('solid sleep duration');
+  }
+  if (rec.factors.hrv.data){
+    const d = (rec.factors.hrv.data.recent - rec.factors.hrv.data.baseline)/rec.factors.hrv.data.baseline*100;
+    if (d > 5) bits.push('HRV elevated above baseline');
+    else if (d < -10) bits.push('HRV suppressed — fatigue or stress signal');
+  }
+  if (rec.factors.rhr.data){
+    const d = (rec.factors.rhr.data.recent - rec.factors.rhr.data.baseline)/rec.factors.rhr.data.baseline*100;
+    if (d > 5) bits.push('RHR running high');
+    else if (d < -3) bits.push('RHR trending down — improving fitness signal');
+  }
+  if (!bits.length) bits.push('all systems near baseline');
+  return bits.join(' · ');
+}
+
+function hrvDeltaText(f){
+  if (!f.data) return '—';
+  const d = (f.data.recent - f.data.baseline);
+  const sign = d>=0?'+':'';
+  return `${sign}${fmt(d,1)} <span class="small">ms (${sign}${fmt(d/f.data.baseline*100,0)}%)</span>`;
+}
+function rhrDeltaText(f){
+  if (!f.data) return '—';
+  const d = (f.data.recent - f.data.baseline);
+  const sign = d>=0?'+':'';
+  return `${sign}${fmt(d,1)} <span class="small">bpm</span>`;
+}
+
+function metricCard(title, value, unit, deltaHTML, sub){
+  return `
+    <div class="card fade">
+      <div class="card-head"><div class="card-title">${title}</div></div>
+      <div class="metric-value">${value} <small>${unit}</small></div>
+      ${deltaHTML}
+      <div class="metric-sub">${sub}</div>
+    </div>`;
+}
+
+function rangeLabel(){
+  if (currentRangeDays === 'all') return 'all time';
+  return `last ${currentRangeDays}d`;
+}
+
+function sleepStagesBlock(days){
+  const stats = {deep:[], rem:[], core:[], awake:[]};
+  for (const d of days){
+    const r = S.sleep[d];
+    if (!r || r.asleepH < 1) continue;
+    stats.deep.push(r.deepH); stats.rem.push(r.remH); stats.core.push(r.coreH); stats.awake.push(r.awakeH);
+  }
+  const md = avg(stats.deep)||0, mr = avg(stats.rem)||0, mc = avg(stats.core)||0, ma = avg(stats.awake)||0;
+  const tot = md+mr+mc+ma;
+  function pct(v){ return tot>0 ? (v/tot*100).toFixed(0)+'%' : '—'; }
+  return `<div class="sleep-stages">
+    <div class="stage deep"><div class="stage-name">Deep</div><div class="stage-val">${fmtH(md)}</div><div class="stage-pct">${pct(md)} of asleep</div></div>
+    <div class="stage rem"><div class="stage-name">REM</div><div class="stage-val">${fmtH(mr)}</div><div class="stage-pct">${pct(mr)} of asleep</div></div>
+    <div class="stage"><div class="stage-name">Core</div><div class="stage-val">${fmtH(mc)}</div><div class="stage-pct">${pct(mc)} of asleep</div></div>
+    <div class="stage"><div class="stage-name">Awake</div><div class="stage-val">${fmtH(ma)}</div><div class="stage-pct">in-bed time</div></div>
+  </div>
+  <div class="metric-sub" style="margin-top:14px">Healthy targets: 13–23% deep, 20–25% REM</div>`;
+}
+
+function sleepConsistencyBlock(days){
+  // stdev of bedtime hour over range
+  const bedtimes = [];
+  const wakes = [];
+  for (const d of days){
+    const r = S.sleep[d];
+    if (!r || !r.bedtime || !r.wakeTime) continue;
+    const b = new Date(r.bedtime);
+    const w = new Date(r.wakeTime);
+    // hour of day in HK = (UTC hour + 8) mod 24, but convert to "hours past 6pm"
+    let bh = (b.getUTCHours() + 8) % 24;
+    if (bh < 12) bh += 24; // bedtime: shift so 1am stays continuous
+    bedtimes.push(bh);
+    let wh = (w.getUTCHours() + 8) % 24;
+    wakes.push(wh);
+  }
+  const bSd = stdev(bedtimes);
+  const wSd = stdev(wakes);
+  const bMean = avg(bedtimes);
+  const wMean = avg(wakes);
+  function hhmm(h){
+    if (h==null) return '—';
+    let hr = h % 24;
+    const m = Math.round((hr - Math.floor(hr))*60);
+    return `${String(Math.floor(hr)).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+  return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+    <div>
+      <div class="card-title" style="margin-bottom:4px">Avg Bedtime</div>
+      <div class="metric-value" style="font-size:32px">${hhmm(bMean)}</div>
+      <div class="metric-sub">σ ${bSd!=null?fmt(bSd*60,0)+' min':'—'} · lower = more consistent</div>
+    </div>
+    <div>
+      <div class="card-title" style="margin-bottom:4px">Avg Wake Time</div>
+      <div class="metric-value" style="font-size:32px">${hhmm(wMean)}</div>
+      <div class="metric-sub">σ ${wSd!=null?fmt(wSd*60,0)+' min':'—'}</div>
+    </div>
+  </div>`;
+}
+
+// ============== CARDIO ==============
+function renderCardio(panel){
+  const days = rangeDays();
+  const allDays = dayList(S.firstDate, S.lastDate);
+
+  // VO2 Max
+  const vo2All = allDays.map(d => (S.daily.VO2Max||{})[d]?.avg || null);
+  const vo2Range = seriesFromDaily('VO2Max');
+  const vo2MoM = momCompare(vo2All, allDays);
+
+  // RHR
+  const rhrAll = allDays.map(d => (S.daily.RestingHeartRate||{})[d]?.avg || null);
+  const rhrMoM = momCompare(rhrAll, allDays);
+
+  // Walking HR avg
+  const whrAll = allDays.map(d => (S.daily.WalkingHeartRateAverage||{})[d]?.avg || null);
+  const whrMoM = momCompare(whrAll, allDays);
+
+  // HR Recovery 1-min
+  const hrr = allDays.map(d => (S.daily.HeartRateRecoveryOneMinute||{})[d]?.avg || null);
+  const hrrMoM = momCompare(hrr, allDays);
+
+  // Zone 2 minutes from workouts: use workouts with avg HR proxy; we don't have HR series tied to workouts.
+  // Approximation: HIIT/Running/Cycling/StairClimbing → assume avg HR derived from intensity rule;
+  // We'll compute "Zone 2 minutes per week" by using DAILY mean HR during workout day vs HRMax — best-effort.
+  // Better: pull per-day average HR (from daily.HeartRate.avg) ONLY on workout days; assume entire workout was at that intensity.
+  // This is approximate; we label clearly.
+
+  const z2Series = computeZone2WeeklyMinutes(days);
+
+  panel.innerHTML = `
+    <div class="grid cols-4 fade">
+      ${metricCard('VO2 Max', fmt(vo2MoM.cur,1), 'mL/min·kg', deltaPill(vo2MoM, false, 1), 'Cardio fitness · higher = better')}
+      ${metricCard('Resting HR', fmt(rhrMoM.cur,0), 'bpm', deltaPill(rhrMoM, true, 0), 'Lower = improving fitness')}
+      ${metricCard('Walking HR', fmt(whrMoM.cur,0), 'bpm', deltaPill(whrMoM, true, 0), 'Avg HR during walking')}
+      ${metricCard('HRR (1 min)', fmt(hrrMoM.cur,0), 'bpm', deltaPill(hrrMoM, false, 0), 'Recovery after peak effort')}
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">VO2 Max · ${rangeLabel()}</div></div>
+        <div class="chart-wrap"><canvas id="ch-vo2"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Resting HR · ${rangeLabel()}</div></div>
+        <div class="chart-wrap"><canvas id="ch-rhr2"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card spanning fade" style="margin-top:16px">
+      <div class="card-head">
+        <div class="card-title">Zone 2 minutes per week (estimated)</div>
+        <div class="meta-info">Heuristic from daily avg HR on workout days · HRmax ${HRMAX}</div>
+      </div>
+      <div class="chart-wrap"><canvas id="ch-z2"></canvas></div>
+      <div class="metric-sub" style="margin-top:8px">Z2 = 60–70% of HRmax (${Math.round(HRMAX*0.6)}–${Math.round(HRMAX*0.7)} bpm). Aim for ≥150 min/week of Z2 for aerobic base.</div>
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">Workout HR distribution (rough)</div></div>
+        ${hrZoneBars(days)}
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">Daily HR profile · resting / avg / max</div></div>
+        <div class="chart-wrap" style="height:260px"><canvas id="ch-hrprofile"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  makeChart($('#ch-vo2'), days, [
+    {label:'VO2 Max', data: vo2Range, borderColor:'rgba(197,240,74,0.95)', backgroundColor:'rgba(197,240,74,0.08)', fill:true},
+    {label:'30d', data: rollingMean(vo2Range,30), borderColor:'rgba(197,240,74,0.4)', borderDash:[5,4], pointRadius:0}
+  ]);
+  const rhrSeries = seriesFromDaily('RestingHeartRate');
+  makeChart($('#ch-rhr2'), days, [
+    {label:'RHR', data: rhrSeries, borderColor:'rgba(127,217,122,0.95)', backgroundColor:'rgba(127,217,122,0.08)', fill:true},
+    {label:'30d', data: rollingMean(rhrSeries,30), borderColor:'rgba(127,217,122,0.4)', borderDash:[5,4], pointRadius:0}
+  ]);
+
+  // Z2 chart
+  makeChart($('#ch-z2'), z2Series.weekLabels, [
+    {type:'bar', label:'Z2 minutes', data: z2Series.minutes, backgroundColor:'rgba(95,208,168,0.8)', borderRadius:4, barPercentage:0.7}
+  ], {scales:{x:{grid:{display:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}}, y:{grid:{color:'#1d2225'}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}, title:{display:true, text:'minutes', color:'#5a6164', font:{family:'JetBrains Mono', size:10}}}}});
+
+  // HR profile chart
+  const hrMin = days.map(d => (S.daily.HeartRate||{})[d]?.min || null);
+  const hrAvg = days.map(d => (S.daily.HeartRate||{})[d]?.avg || null);
+  const hrMax = days.map(d => (S.daily.HeartRate||{})[d]?.max || null);
+  makeChart($('#ch-hrprofile'), days, [
+    {label:'max', data: hrMax, borderColor:'rgba(239,106,106,0.7)', backgroundColor:'transparent', pointRadius:0},
+    {label:'avg', data: hrAvg, borderColor:'rgba(197,240,74,0.9)', backgroundColor:'transparent', pointRadius:0},
+    {label:'min', data: hrMin, borderColor:'rgba(74,144,226,0.7)', backgroundColor:'transparent', pointRadius:0}
+  ]);
+}
+
+function computeZone2WeeklyMinutes(days){
+  // For each workout in range, if workout day has daily.HeartRate.avg in Z2 band → count workout minutes
+  const z2lo = HRMAX*0.6, z2hi = HRMAX*0.7;
+  const weekBuckets = {}; // YYYY-WW -> minutes
+  const ws = workoutsInRange();
+  for (const w of ws){
+    const dayHr = (S.daily.HeartRate||{})[w.day]?.avg;
+    if (!dayHr) continue;
+    if (dayHr >= z2lo && dayHr <= z2hi){
+      const d = new Date(w.day+'T00:00:00');
+      // ISO week label
+      const wk = isoWeek(d);
+      weekBuckets[wk] = (weekBuckets[wk]||0) + (w.durationMin || 0);
+    }
+  }
+  const weekKeys = Object.keys(weekBuckets).sort();
+  return {weekLabels: weekKeys, minutes: weekKeys.map(k => Math.round(weekBuckets[k]))};
+}
+function isoWeek(d){
+  // returns "YYYY-Www"
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dow = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dow);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil(((date - yearStart)/86400000 + 1)/7);
+  return `${date.getUTCFullYear()}-W${String(wk).padStart(2,'0')}`;
+}
+
+function hrZoneBars(days){
+  const z = [0,0,0,0,0]; // Z1..Z5 minutes (estimated)
+  const ws = workoutsInRange();
+  for (const w of ws){
+    const dayHr = (S.daily.HeartRate||{})[w.day]?.avg;
+    if (!dayHr || !w.durationMin) continue;
+    const p = dayHr/HRMAX;
+    let zone = 0;
+    if (p < 0.6) zone = 0;
+    else if (p < 0.7) zone = 1;
+    else if (p < 0.8) zone = 2;
+    else if (p < 0.9) zone = 3;
+    else zone = 4;
+    z[zone] += w.durationMin;
+  }
+  const total = z.reduce((a,b)=>a+b,0) || 1;
+  const labels = ['Z1 (<60%)','Z2 (60-70%)','Z3 (70-80%)','Z4 (80-90%)','Z5 (>90%)'];
+  const cls = ['z1','z2','z3','z4','z5'];
+  return `<div class="zones">${z.map((v,i)=>`
+    <div class="zone">
+      <span class="zone-name">${labels[i]}</span>
+      <div class="zone-bar"><div class="zone-fill ${cls[i]}" style="width:${(v/total*100).toFixed(0)}%"></div></div>
+      <span class="zone-val">${fmtInt(v)} m</span>
+    </div>`).join('')}</div>
+  <div class="metric-sub" style="margin-top:14px">Estimated from daily mean HR on workout days. Each workout charged to its day's average zone.</div>`;
+}
+
+// ============== BODY ==============
+function renderBody(panel){
+  const days = rangeDays();
+  const allDays = dayList(S.firstDate, S.lastDate);
+
+  const wAll = allDays.map(d => (S.daily.BodyMass||{})[d]?.avg || null);
+  const bfAll = allDays.map(d => (S.daily.BodyFatPercentage||{})[d]?.avg || null);
+  const lbmAll = allDays.map(d => (S.daily.LeanBodyMass||{})[d]?.avg || null);
+  const bmiAll = allDays.map(d => (S.daily.BodyMassIndex||{})[d]?.avg || null);
+
+  const wMoM = momCompare(wAll, allDays);
+  const bfMoM = momCompare(bfAll, allDays);
+  const lbmMoM = momCompare(lbmAll, allDays);
+  const bmiMoM = momCompare(bmiAll, allDays);
+
+  // Active + Basal energy daily for TDEE estimate
+  const actAll = allDays.map(d => (S.daily.ActiveEnergyBurned||{})[d]?.sum || null);
+  const basAll = allDays.map(d => (S.daily.BasalEnergyBurned||{})[d]?.sum || null);
+  const tdeeAll = allDays.map((d,i) => (actAll[i]!=null && basAll[i]!=null) ? actAll[i]+basAll[i] : null);
+  const tdeeMoM = momCompare(tdeeAll, allDays);
+
+  panel.innerHTML = `
+    <div class="grid cols-4 fade">
+      ${metricCard('Weight', fmt(wMoM.cur,1), 'kg', deltaPill(wMoM, false, 2, ' kg'), 'recent 30d avg')}
+      ${metricCard('Body Fat', fmt(bfMoM.cur,1), '%', deltaPill(bfMoM, true, 1, '%'), 'Xiaomi smart scale')}
+      ${metricCard('Lean Mass', fmt(lbmMoM.cur,1), 'kg', deltaPill(lbmMoM, false, 2, ' kg'), 'Muscle/lean mass')}
+      ${metricCard('TDEE est.', fmtInt(tdeeMoM.cur), 'kcal', deltaPill(tdeeMoM, false, 0, ' kcal'), 'Active + basal energy')}
+    </div>
+
+    <div class="card chart-card spanning fade" style="margin-top:16px">
+      <div class="card-head">
+        <div class="card-title">Recomp trajectory · weight vs body fat</div>
+        <div class="meta-info">target: stable weight, declining BF%</div>
+      </div>
+      <div class="chart-wrap tall"><canvas id="ch-recomp"></canvas></div>
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Lean body mass · ${rangeLabel()}</div></div>
+        <div class="chart-wrap"><canvas id="ch-lbm"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Energy burn (TDEE est.) · ${rangeLabel()}</div></div>
+        <div class="chart-wrap"><canvas id="ch-tdee"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  const w = seriesFromDaily('BodyMass');
+  const bf = seriesFromDaily('BodyFatPercentage');
+  const wSmooth = rollingMean(w, 7);
+  const bfSmooth = rollingMean(bf, 7);
+
+  // dual axis
+  const ctx = $('#ch-recomp');
+  charts['ch-recomp'] = new Chart(ctx, {
+    type:'line',
+    data:{ labels: days.map(d => { const [y,m,dd]=d.split('-'); return `${dd}/${m}`; }), datasets:[
+      {label:'Weight (kg)', data:w, borderColor:'rgba(197,240,74,0.4)', backgroundColor:'transparent', pointRadius:0, yAxisID:'y1', borderWidth:1},
+      {label:'Weight 7d', data:wSmooth, borderColor:'rgba(197,240,74,0.95)', backgroundColor:'transparent', pointRadius:0, yAxisID:'y1', borderWidth:2.5},
+      {label:'Body Fat (%)', data:bf, borderColor:'rgba(232,170,255,0.4)', backgroundColor:'transparent', pointRadius:0, yAxisID:'y2', borderWidth:1},
+      {label:'BF% 7d', data:bfSmooth, borderColor:'rgba(232,170,255,0.95)', backgroundColor:'transparent', pointRadius:0, yAxisID:'y2', borderWidth:2.5},
+    ]},
+    options:{...structuredClone(chartDefaults),
+      scales:{
+        x:{grid:{display:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}, maxRotation:0, autoSkipPadding:20}},
+        y1:{position:'left', grid:{color:'#1d2225'}, ticks:{color:'rgba(197,240,74,0.7)', font:{family:'JetBrains Mono', size:9}}, title:{display:true, text:'kg', color:'#5a6164', font:{family:'JetBrains Mono', size:10}}},
+        y2:{position:'right', grid:{display:false}, ticks:{color:'rgba(232,170,255,0.7)', font:{family:'JetBrains Mono', size:9}}, title:{display:true, text:'%', color:'#5a6164', font:{family:'JetBrains Mono', size:10}}}
+      },
+      plugins:{legend:{display:true, position:'top', align:'end', labels:{color:'#9aa0a0', font:{family:'JetBrains Mono', size:10}, boxWidth:10, boxHeight:10}}, tooltip:chartDefaults.plugins.tooltip}
+    }
+  });
+
+  const lbm = seriesFromDaily('LeanBodyMass');
+  makeChart($('#ch-lbm'), days, [
+    {label:'LBM', data: lbm, borderColor:'rgba(95,208,168,0.95)', backgroundColor:'rgba(95,208,168,0.08)', fill:true},
+    {label:'7d', data: rollingMean(lbm,7), borderColor:'rgba(95,208,168,0.4)', borderDash:[5,4], pointRadius:0}
+  ]);
+
+  const tdee = days.map(d => {
+    const a = (S.daily.ActiveEnergyBurned||{})[d]?.sum;
+    const b = (S.daily.BasalEnergyBurned||{})[d]?.sum;
+    return (a!=null && b!=null) ? a+b : null;
+  });
+  makeChart($('#ch-tdee'), days, [
+    {type:'bar', label:'TDEE', data: tdee, backgroundColor:'rgba(240,193,74,0.65)', borderRadius:2, barPercentage:1, categoryPercentage:0.9},
+    {label:'7d avg', data: rollingMean(tdee,7), borderColor:'rgba(240,193,74,1)', backgroundColor:'transparent', pointRadius:0, borderWidth:2}
+  ], {scales:{x:{grid:{display:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}, maxRotation:0, autoSkipPadding:20}}, y:{grid:{color:'#1d2225'}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}, title:{display:true, text:'kcal', color:'#5a6164', font:{family:'JetBrains Mono', size:10}}}}});
+}
+
+// ============== TRAINING ==============
+function renderTraining(panel){
+  const days = rangeDays();
+  const ws = workoutsInRange();
+  // by type
+  const byType = {};
+  for (const w of ws){
+    if (!byType[w.type]) byType[w.type] = {count:0, totalMin:0, totalEnergy:0};
+    byType[w.type].count++;
+    byType[w.type].totalMin += w.durationMin || 0;
+    byType[w.type].totalEnergy += w.energy || 0;
+  }
+  const types = Object.keys(byType).sort((a,b)=> byType[b].count - byType[a].count);
+
+  // PPL adherence: strength workouts per week
+  const strengthByWeek = {};
+  const allByWeek = {};
+  for (const w of ws){
+    const wk = isoWeek(new Date(w.day+'T00:00:00'));
+    allByWeek[wk] = (allByWeek[wk]||0) + 1;
+    if (w.type === 'TraditionalStrengthTraining'){
+      strengthByWeek[wk] = (strengthByWeek[wk]||0) + 1;
+    }
+  }
+  const weekKeys = Object.keys(allByWeek).sort();
+  const recentWeeks = weekKeys.slice(-12);
+  const strengthSessionsRecent = recentWeeks.map(wk => strengthByWeek[wk] || 0);
+  const totalSessionsRecent = recentWeeks.map(wk => allByWeek[wk] || 0);
+
+  // ACWR: acute (7d) vs chronic (28d) workout load proxy = total minutes
+  const allDays = dayList(S.firstDate, S.lastDate);
+  const dayMin = {};
+  for (const w of S.workouts){ dayMin[w.day] = (dayMin[w.day]||0) + (w.durationMin||0); }
+  const dailyMins = allDays.map(d => dayMin[d] || 0);
+  const acute7 = rollingMean(dailyMins, 7);
+  const chronic28 = rollingMean(dailyMins, 28);
+  const acwr = acute7.map((a,i) => chronic28[i] > 0 ? a/chronic28[i] : null);
+  const lastAcwr = acwr.filter(x=>x!=null).slice(-1)[0];
+  const acwrFlag = lastAcwr == null ? 'neutral' : (lastAcwr > 1.5 ? 'bad' : (lastAcwr > 1.3 ? 'warn' : 'good'));
+
+  // strength avg / week (recent)
+  const sAvg = avg(strengthSessionsRecent.slice(-4)) || 0;
+
+  panel.innerHTML = `
+    <div class="grid cols-4 fade">
+      ${metricCard('Workouts', fmtInt(ws.length), '', '', `total · ${rangeLabel()}`)}
+      ${metricCard('Strength/wk', fmt(sAvg,1), 'sess', '', 'recent 4wk avg · target 5-6')}
+      ${metricCard('Time / wk', fmtInt(avg(recentWeeks.map(wk => {
+        let m = 0;
+        for (const w of S.workouts){ if (isoWeek(new Date(w.day+'T00:00:00'))===wk) m += w.durationMin||0; }
+        return m;
+      }))), 'min', '', 'recent weekly average')}
+      ${metricCard('ACWR', fmt(lastAcwr,2), '', `<span class="metric-delta ${acwrFlag==='bad'?'bad':(acwrFlag==='warn'?'neutral':'good')}">${acwrFlag==='bad'?'⚠ injury risk':(acwrFlag==='warn'?'elevated':'in zone')}</span>`, 'Acute/chronic workload (sweet spot 0.8–1.3)')}
+    </div>
+
+    <div class="card spanning fade" style="margin-top:16px">
+      <div class="card-head"><div class="card-title">Weekly workout sessions · last 12 weeks</div></div>
+      <div class="chart-wrap"><canvas id="ch-weekly"></canvas></div>
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">Workout mix · ${rangeLabel()}</div></div>
+        ${workoutMixBlock(byType, types)}
+      </div>
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Daily training load (minutes)</div></div>
+        <div class="chart-wrap"><canvas id="ch-load"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card spanning fade" style="margin-top:16px">
+      <div class="card-head"><div class="card-title">Recent workouts</div></div>
+      ${workoutTable(ws.slice(-20).reverse())}
+    </div>
+  `;
+
+  // Weekly stacked bar
+  // group recent workouts by type per week
+  const stack = {strength:[], cardio:[], walk:[], other:[]};
+  for (const wk of recentWeeks){
+    let s=0, c=0, walk=0, o=0;
+    for (const w of S.workouts){
+      if (isoWeek(new Date(w.day+'T00:00:00'))!==wk) continue;
+      if (w.type==='TraditionalStrengthTraining') s++;
+      else if (['Running','Cycling','HighIntensityIntervalTraining','StairClimbing','Elliptical','Swimming'].includes(w.type)) c++;
+      else if (w.type==='Walking') walk++;
+      else o++;
+    }
+    stack.strength.push(s); stack.cardio.push(c); stack.walk.push(walk); stack.other.push(o);
+  }
+  const lbls = recentWeeks.map(wk => wk.replace(/^\d{4}-/, ''));
+  const canvas = $('#ch-weekly');
+  charts['ch-weekly'] = new Chart(canvas, {
+    type:'bar',
+    data:{labels:lbls, datasets:[
+      {label:'Strength', data:stack.strength, backgroundColor:'rgba(197,240,74,0.85)', stack:'s'},
+      {label:'Cardio', data:stack.cardio, backgroundColor:'rgba(95,208,168,0.85)', stack:'s'},
+      {label:'Walking', data:stack.walk, backgroundColor:'rgba(154,160,160,0.6)', stack:'s'},
+      {label:'Other', data:stack.other, backgroundColor:'rgba(240,193,74,0.6)', stack:'s'},
+    ]},
+    options:{...structuredClone(chartDefaults), scales:{
+      x:{stacked:true, grid:{display:false}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}},
+      y:{stacked:true, grid:{color:'#1d2225'}, ticks:{color:'#5a6164', font:{family:'JetBrains Mono', size:9}}, title:{display:true, text:'sessions', color:'#5a6164', font:{family:'JetBrains Mono', size:10}}}
+    },
+    plugins:{legend:{display:true, position:'top', align:'end', labels:{color:'#9aa0a0', font:{family:'JetBrains Mono', size:10}, boxWidth:10, boxHeight:10}}, tooltip:chartDefaults.plugins.tooltip}}
+  });
+
+  // Daily load
+  const dl = days.map(d => dayMin[d] || 0);
+  const dlSmooth = rollingMean(dl, 7);
+  makeChart($('#ch-load'), days, [
+    {type:'bar', label:'Daily min', data: dl, backgroundColor:'rgba(232,170,255,0.55)', borderRadius:2, barPercentage:1, categoryPercentage:0.9},
+    {label:'7d avg', data: dlSmooth, borderColor:'rgba(232,170,255,1)', backgroundColor:'transparent', pointRadius:0, borderWidth:2}
+  ]);
+}
+
+function workoutMixBlock(byType, types){
+  const total = types.reduce((s,t)=>s+byType[t].totalMin,0) || 1;
+  return `<div class="zones">${types.map(t => {
+    const v = byType[t];
+    const pct = v.totalMin/total*100;
+    return `<div class="zone">
+      <span class="zone-name">${prettyType(t)}</span>
+      <div class="zone-bar"><div class="zone-fill" style="width:${pct.toFixed(0)}%;background:${typeColor(t)}"></div></div>
+      <span class="zone-val">${v.count}× · ${fmtInt(v.totalMin)}m</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+function prettyType(t){
+  return ({TraditionalStrengthTraining:'Strength', HighIntensityIntervalTraining:'HIIT', StairClimbing:'Stairs'})[t] || t;
+}
+function typeColor(t){
+  return ({TraditionalStrengthTraining:'#c5f04a', Running:'#ef6a6a', Cycling:'#f08c4a', HighIntensityIntervalTraining:'#f0c14a', Walking:'#9aa0a0', StairClimbing:'#5fd0a8', Swimming:'#4a90e2'})[t] || '#e8aaff';
+}
+
+function workoutTable(ws){
+  return `<table><thead><tr><th>Date</th><th>Type</th><th>Duration</th><th>Energy</th><th>Distance</th></tr></thead>
+  <tbody>${ws.map(w => `<tr>
+    <td>${new Date(w.day+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'2-digit'})}</td>
+    <td>${prettyType(w.type)}</td>
+    <td class="num">${fmt(w.durationMin,0)} min</td>
+    <td class="num">${w.energy?fmtInt(w.energy)+' kcal':'—'}</td>
+    <td class="num">${w.distance?fmt(w.distance,2)+' km':'—'}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+// ============== ACTIVITY ==============
+function renderActivity(panel){
+  const days = rangeDays();
+  const allDays = dayList(S.firstDate, S.lastDate);
+
+  const stepsAll = allDays.map(d => (S.daily.StepCount||{})[d]?.sum || null);
+  const distAll = allDays.map(d => (S.daily.DistanceWalkingRunning||{})[d]?.sum || null);
+  const flightsAll = allDays.map(d => (S.daily.FlightsClimbed||{})[d]?.sum || null);
+  const dayLightAll = allDays.map(d => (S.daily.TimeInDaylight||{})[d]?.sum || null);
+
+  const stepsMoM = momCompare(stepsAll, allDays);
+  const distMoM = momCompare(distAll, allDays);
+  const flightsMoM = momCompare(flightsAll, allDays);
+  const dlMoM = momCompare(dayLightAll, allDays);
+
+  // exercise ring closure (activity summary)
+  const acts = days.map(d => S.activity[d] || null);
+  const exMins = acts.map(a => a ? a.exercise : null);
+  const standH = acts.map(a => a ? a.standH : null);
+  const actEn = acts.map(a => a ? a.active : null);
+
+  panel.innerHTML = `
+    <div class="grid cols-4 fade">
+      ${metricCard('Steps / day', fmtInt(stepsMoM.cur), '', deltaPill(stepsMoM, false, 0), '30d avg')}
+      ${metricCard('Distance / day', fmt(distMoM.cur,2), 'km', deltaPill(distMoM, false, 2, ' km'), 'walk + run')}
+      ${metricCard('Flights / day', fmt(flightsMoM.cur,1), '', deltaPill(flightsMoM, false, 1), 'stairs climbed')}
+      ${metricCard('Daylight / day', fmtInt(dlMoM.cur), 'min', deltaPill(dlMoM, false, 0, ' min'), 'circadian / mood')}
+    </div>
+
+    <div class="card chart-card spanning fade" style="margin-top:16px">
+      <div class="card-head"><div class="card-title">Daily steps · ${rangeLabel()}</div></div>
+      <div class="chart-wrap"><canvas id="ch-steps"></canvas></div>
+    </div>
+
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Exercise minutes · daily</div></div>
+        <div class="chart-wrap"><canvas id="ch-ex"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Active energy · daily</div></div>
+        <div class="chart-wrap"><canvas id="ch-ae"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  const steps = days.map(d => (S.daily.StepCount||{})[d]?.sum || null);
+  makeChart($('#ch-steps'), days, [
+    {type:'bar', label:'Steps', data: steps, backgroundColor:'rgba(197,240,74,0.6)', borderRadius:2, barPercentage:1, categoryPercentage:0.9},
+    {label:'7d avg', data: rollingMean(steps,7), borderColor:'rgba(197,240,74,1)', backgroundColor:'transparent', pointRadius:0, borderWidth:2}
+  ]);
+
+  makeChart($('#ch-ex'), days, [
+    {type:'bar', label:'Ex min', data: exMins, backgroundColor:'rgba(95,208,168,0.7)', borderRadius:2, barPercentage:1, categoryPercentage:0.9}
+  ]);
+
+  makeChart($('#ch-ae'), days, [
+    {label:'Active kcal', data: actEn, borderColor:'rgba(240,193,74,0.95)', backgroundColor:'rgba(240,193,74,0.08)', fill:true, pointRadius:0}
+  ]);
+}
+
+// ============== ENVIRONMENT ==============
+function renderEnvironment(panel){
+  const days = rangeDays();
+  const allDays = dayList(S.firstDate, S.lastDate);
+
+  const envAll = allDays.map(d => (S.daily.EnvironmentalAudioExposure||{})[d]?.avg || null);
+  const hpAll = allDays.map(d => (S.daily.HeadphoneAudioExposure||{})[d]?.avg || null);
+  const dlAll = allDays.map(d => (S.daily.TimeInDaylight||{})[d]?.sum || null);
+
+  const envMoM = momCompare(envAll, allDays);
+  const hpMoM = momCompare(hpAll, allDays);
+  const dlMoM = momCompare(dlAll, allDays);
+
+  // Days over 80 dB headphone
+  const over80 = hpAll.slice(-30).filter(x => x!=null && x > 80).length;
+
+  panel.innerHTML = `
+    <div class="grid cols-3 fade">
+      ${metricCard('Headphone audio', fmt(hpMoM.cur,0), 'dB', deltaPill(hpMoM, true, 0, ' dB'), `${over80} days over 80 dB in last 30`)}
+      ${metricCard('Environmental audio', fmt(envMoM.cur,0), 'dB', deltaPill(envMoM, true, 0, ' dB'), 'ambient noise exposure')}
+      ${metricCard('Daylight time', fmtInt(dlMoM.cur), 'min/day', deltaPill(dlMoM, false, 0, ' min'), 'circadian rhythm signal')}
+    </div>
+    <div class="grid cols-2 fade" style="margin-top:16px">
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Headphone exposure · ${rangeLabel()}</div></div>
+        <div class="chart-wrap"><canvas id="ch-hp"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <div class="card-head"><div class="card-title">Daylight exposure · ${rangeLabel()}</div></div>
+        <div class="chart-wrap"><canvas id="ch-dl"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  const hp = seriesFromDaily('HeadphoneAudioExposure');
+  makeChart($('#ch-hp'), days, [
+    {label:'dB', data: hp, borderColor:'rgba(239,106,106,0.95)', backgroundColor:'rgba(239,106,106,0.08)', fill:true},
+    {label:'7d', data: rollingMean(hp,7), borderColor:'rgba(239,106,106,0.4)', borderDash:[5,4], pointRadius:0}
+  ]);
+
+  const dl = days.map(d => (S.daily.TimeInDaylight||{})[d]?.sum || null);
+  makeChart($('#ch-dl'), days, [
+    {type:'bar', label:'min', data: dl, backgroundColor:'rgba(240,193,74,0.7)', borderRadius:2, barPercentage:1, categoryPercentage:0.9},
+    {label:'7d', data: rollingMean(dl,7), borderColor:'rgba(240,193,74,1)', backgroundColor:'transparent', pointRadius:0, borderWidth:2}
+  ]);
+}
+
+</script>
+</body>
+</html>
