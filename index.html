@@ -273,6 +273,9 @@
     <div class="privacy">
       <strong>100% local.</strong> Your data is parsed in your browser using a web worker and cached in IndexedDB on this device. Nothing is uploaded to any server. To clear, hit "Clear cache" or use your browser's site-data tools.
     </div>
+    <div class="privacy" id="ios-warning" style="margin-top:12px;background:rgba(240,193,74,0.06);border-color:rgba(240,193,74,0.2);display:none">
+      <strong style="color:var(--warn)">iOS / iPad note.</strong> Mobile Safari limits each tab to about 1–1.5 GB of memory. Large Apple Health exports (over ~500 MB zipped) may crash with "A problem repeatedly occurred." For best results on iOS, parse once on a laptop — the dashboard then caches the summary in IndexedDB and you can view it on iOS afterward.
+    </div>
   </section>
 
   <!-- Progress modal -->
@@ -392,163 +395,163 @@ function* chunkU8(u8, chunkSize = 4 * 1024 * 1024){
   }
 }
 
-async function parseExport(payload){
-  // payload: { u8: Uint8Array (the XML bytes) }
-  const u8 = payload.u8;
-  const totalBytes = u8.length;
-  postMessage({type:'progress', pct: 25, text:'Scanning records…'});
+// ====== Stateful streaming parser ======
+const TZ_MIN = 480; // HK +08:00
+let daily = {};
+let sleepByNight = {};
+let workouts = [];
+let activity = {};
+let firstSeenDate = null;
+let lastSeenDate = null;
+let decoder = null;
+let carry = '';
+let bytesScanned = 0;
+let lastProgressAt = 0;
+const tagRe = /<(Record|Workout|ActivitySummary)\b([^>]*)\/?>/g;
 
-  const TZ_MIN = 480; // HK +08:00
+function resetState(){
+  daily = {}; sleepByNight = {}; workouts = []; activity = {};
+  firstSeenDate = null; lastSeenDate = null;
+  decoder = new TextDecoder('utf-8');
+  carry = '';
+  bytesScanned = 0;
+  lastProgressAt = 0;
+}
 
-  // Daily aggregates
-  const daily = {};
-  function bump(type, day, value){
-    let m = daily[type]; if (!m){ m = daily[type] = {}; }
-    let r = m[day]; if (!r){ r = m[day] = {sum:0, count:0, min:Infinity, max:-Infinity}; }
-    r.sum += value; r.count += 1;
-    if (value < r.min) r.min = value;
-    if (value > r.max) r.max = value;
+function bump(type, day, value){
+  let m = daily[type]; if (!m){ m = daily[type] = {}; }
+  let r = m[day]; if (!r){ r = m[day] = {sum:0, count:0, min:Infinity, max:-Infinity}; }
+  r.sum += value; r.count += 1;
+  if (value < r.min) r.min = value;
+  if (value > r.max) r.max = value;
+}
+function sleepNight(startMs){
+  const d = new Date(startMs + TZ_MIN*60000);
+  const hour = d.getUTCHours();
+  let dayDate;
+  if (hour < 18){
+    dayDate = new Date(d.getTime() - 86400000);
+  } else {
+    dayDate = d;
   }
+  return dayDate.toISOString().slice(0,10);
+}
 
-  const sleepByNight = {};
-  function sleepNight(startMs){
-    const d = new Date(startMs + TZ_MIN*60000);
-    const hour = d.getUTCHours();
-    let dayDate;
-    if (hour < 18){
-      dayDate = new Date(d.getTime() - 86400000);
-    } else {
-      dayDate = d;
-    }
-    return dayDate.toISOString().slice(0,10);
-  }
+function processChunkStr(chunkStr){
+  let m;
+  tagRe.lastIndex = 0;
+  while ((m = tagRe.exec(chunkStr)) !== null){
+    const tag = m[1];
+    const attrs = m[2];
 
-  const workouts = [];
-  const activity = {};
-  const tagRe = /<(Record|Workout|ActivitySummary)\b([^>]*)\/?>/g;
+    if (tag === 'Record'){
+      const tm = attrs.match(ATTR_RE.type);
+      if (!tm) continue;
+      const type = tm[1];
+      if (!CARES.has(type)) continue;
+      const sm = attrs.match(ATTR_RE.startDate);
+      if (!sm) continue;
+      const startMs = parseAppleDate(sm[1]);
+      if (!startMs) continue;
 
-  let firstSeenDate = null;
-  let lastSeenDate = null;
-
-  function processChunk(chunkStr){
-    let m;
-    tagRe.lastIndex = 0;
-    while ((m = tagRe.exec(chunkStr)) !== null){
-      const tag = m[1];
-      const attrs = m[2];
-
-      if (tag === 'Record'){
-        const tm = attrs.match(ATTR_RE.type);
-        if (!tm) continue;
-        const type = tm[1];
-        if (!CARES.has(type)) continue;
-        const sm = attrs.match(ATTR_RE.startDate);
-        if (!sm) continue;
-        const startMs = parseAppleDate(sm[1]);
-        if (!startMs) continue;
-
-        if (type === 'HKCategoryTypeIdentifierSleepAnalysis'){
-          const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
-          const endMs = parseAppleDate(em[1]); if (!endMs) continue;
-          const vm = attrs.match(ATTR_RE.value); const stage = vm ? vm[1] : '';
-          const night = sleepNight(startMs);
-          if (!sleepByNight[night]) sleepByNight[night] = {inBed:0, asleep:0, deep:0, rem:0, core:0, awake:0, unspec:0, startEarliest:Infinity, endLatest:-Infinity};
-          const dur = Math.max(0, (endMs - startMs)/1000);
-          const r = sleepByNight[night];
-          if (stage === 'HKCategoryValueSleepAnalysisInBed') r.inBed += dur;
-          else if (stage === 'HKCategoryValueSleepAnalysisAwake') { r.awake += dur; }
-          else if (stage === 'HKCategoryValueSleepAnalysisAsleepDeep'){ r.deep += dur; r.asleep += dur; }
-          else if (stage === 'HKCategoryValueSleepAnalysisAsleepREM'){ r.rem += dur; r.asleep += dur; }
-          else if (stage === 'HKCategoryValueSleepAnalysisAsleepCore'){ r.core += dur; r.asleep += dur; }
-          else if (stage === 'HKCategoryValueSleepAnalysisAsleepUnspecified'){ r.unspec += dur; r.asleep += dur; }
-          if (startMs < r.startEarliest) r.startEarliest = startMs;
-          if (endMs > r.endLatest) r.endLatest = endMs;
-          continue;
-        }
-
-        if (type === 'HKCategoryTypeIdentifierMindfulSession'){
-          const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
-          const endMs = parseAppleDate(em[1]); if (!endMs) continue;
-          const day = dayKey(startMs, TZ_MIN);
-          bump('MindfulMinutes', day, (endMs-startMs)/60000);
-          continue;
-        }
-
-        const vm = attrs.match(ATTR_RE.value); if (!vm) continue;
-        const value = parseFloat(vm[1]);
-        if (isNaN(value)) continue;
-        const day = dayKey(startMs, TZ_MIN);
-
-        if (firstSeenDate === null || day < firstSeenDate) firstSeenDate = day;
-        if (lastSeenDate === null || day > lastSeenDate) lastSeenDate = day;
-
-        let v = value;
-        const unit = (attrs.match(ATTR_RE.unit) || [])[1] || '';
-        const short = type.replace('HKQuantityTypeIdentifier','').replace('HKCategoryTypeIdentifier','');
-        if (short === 'BodyMass' || short === 'LeanBodyMass'){
-          if (unit === 'lb') v = value * 0.45359237;
-        } else if (short === 'BodyFatPercentage'){
-          if (value < 1.5) v = value * 100;
-        } else if (short === 'Height'){
-          if (unit === 'ft') v = value * 30.48;
-          else if (unit === 'in') v = value * 2.54;
-        }
-        bump(short, day, v);
-
-      } else if (tag === 'Workout'){
-        const wm = attrs.match(ATTR_RE.workoutActivityType); if (!wm) continue;
-        const sm = attrs.match(ATTR_RE.startDate); if (!sm) continue;
-        const em = attrs.match(ATTR_RE.endDate);
-        const startMs = parseAppleDate(sm[1]);
-        const endMs = em ? parseAppleDate(em[1]) : null;
-        const dur = parseFloat((attrs.match(ATTR_RE.duration) || [])[1] || '0');
-        const energy = parseFloat((attrs.match(ATTR_RE.totalEnergyBurned) || [])[1] || '0');
-        const dist = parseFloat((attrs.match(ATTR_RE.totalDistance) || [])[1] || '0');
-        workouts.push({
-          type: wm[1].replace('HKWorkoutActivityType',''),
-          start: startMs, end: endMs,
-          durationMin: dur, energy, distance: dist,
-          day: dayKey(startMs, TZ_MIN)
-        });
-      } else if (tag === 'ActivitySummary'){
-        const dc = (attrs.match(ATTR_RE.dateComponents) || [])[1];
-        if (!dc) continue;
-        const ae = parseFloat((attrs.match(ATTR_RE.activeEnergyBurned) || [])[1] || '0');
-        const ex = parseFloat((attrs.match(ATTR_RE.appleExerciseTime) || [])[1] || '0');
-        const sh = parseFloat((attrs.match(ATTR_RE.appleStandHours) || [])[1] || '0');
-        activity[dc] = {active: ae, exercise: ex, standH: sh};
+      if (type === 'HKCategoryTypeIdentifierSleepAnalysis'){
+        const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
+        const endMs = parseAppleDate(em[1]); if (!endMs) continue;
+        const vm = attrs.match(ATTR_RE.value); const stage = vm ? vm[1] : '';
+        const night = sleepNight(startMs);
+        if (!sleepByNight[night]) sleepByNight[night] = {inBed:0, asleep:0, deep:0, rem:0, core:0, awake:0, unspec:0, startEarliest:Infinity, endLatest:-Infinity};
+        const dur = Math.max(0, (endMs - startMs)/1000);
+        const r = sleepByNight[night];
+        if (stage === 'HKCategoryValueSleepAnalysisInBed') r.inBed += dur;
+        else if (stage === 'HKCategoryValueSleepAnalysisAwake') { r.awake += dur; }
+        else if (stage === 'HKCategoryValueSleepAnalysisAsleepDeep'){ r.deep += dur; r.asleep += dur; }
+        else if (stage === 'HKCategoryValueSleepAnalysisAsleepREM'){ r.rem += dur; r.asleep += dur; }
+        else if (stage === 'HKCategoryValueSleepAnalysisAsleepCore'){ r.core += dur; r.asleep += dur; }
+        else if (stage === 'HKCategoryValueSleepAnalysisAsleepUnspecified'){ r.unspec += dur; r.asleep += dur; }
+        if (startMs < r.startEarliest) r.startEarliest = startMs;
+        if (endMs > r.endLatest) r.endLatest = endMs;
+        continue;
       }
+
+      if (type === 'HKCategoryTypeIdentifierMindfulSession'){
+        const em = attrs.match(ATTR_RE.endDate); if (!em) continue;
+        const endMs = parseAppleDate(em[1]); if (!endMs) continue;
+        const day = dayKey(startMs, TZ_MIN);
+        bump('MindfulMinutes', day, (endMs-startMs)/60000);
+        continue;
+      }
+
+      const vm = attrs.match(ATTR_RE.value); if (!vm) continue;
+      const value = parseFloat(vm[1]);
+      if (isNaN(value)) continue;
+      const day = dayKey(startMs, TZ_MIN);
+
+      if (firstSeenDate === null || day < firstSeenDate) firstSeenDate = day;
+      if (lastSeenDate === null || day > lastSeenDate) lastSeenDate = day;
+
+      let v = value;
+      const unit = (attrs.match(ATTR_RE.unit) || [])[1] || '';
+      const short = type.replace('HKQuantityTypeIdentifier','').replace('HKCategoryTypeIdentifier','');
+      if (short === 'BodyMass' || short === 'LeanBodyMass'){
+        if (unit === 'lb') v = value * 0.45359237;
+      } else if (short === 'BodyFatPercentage'){
+        if (value < 1.5) v = value * 100;
+      } else if (short === 'Height'){
+        if (unit === 'ft') v = value * 30.48;
+        else if (unit === 'in') v = value * 2.54;
+      }
+      bump(short, day, v);
+
+    } else if (tag === 'Workout'){
+      const wm = attrs.match(ATTR_RE.workoutActivityType); if (!wm) continue;
+      const sm = attrs.match(ATTR_RE.startDate); if (!sm) continue;
+      const em = attrs.match(ATTR_RE.endDate);
+      const startMs = parseAppleDate(sm[1]);
+      const endMs = em ? parseAppleDate(em[1]) : null;
+      const dur = parseFloat((attrs.match(ATTR_RE.duration) || [])[1] || '0');
+      const energy = parseFloat((attrs.match(ATTR_RE.totalEnergyBurned) || [])[1] || '0');
+      const dist = parseFloat((attrs.match(ATTR_RE.totalDistance) || [])[1] || '0');
+      workouts.push({
+        type: wm[1].replace('HKWorkoutActivityType',''),
+        start: startMs, end: endMs,
+        durationMin: dur, energy, distance: dist,
+        day: dayKey(startMs, TZ_MIN)
+      });
+    } else if (tag === 'ActivitySummary'){
+      const dc = (attrs.match(ATTR_RE.dateComponents) || [])[1];
+      if (!dc) continue;
+      const ae = parseFloat((attrs.match(ATTR_RE.activeEnergyBurned) || [])[1] || '0');
+      const ex = parseFloat((attrs.match(ATTR_RE.appleExerciseTime) || [])[1] || '0');
+      const sh = parseFloat((attrs.match(ATTR_RE.appleStandHours) || [])[1] || '0');
+      activity[dc] = {active: ae, exercise: ex, standH: sh};
     }
   }
+}
 
-  // Stream-decode chunks, keep a tail buffer to avoid splitting tags
-  const decoder = new TextDecoder('utf-8');
-  let carry = '';
-  let bytesRead = 0;
-  let lastProgressAt = 0;
-
-  for (const chunk of chunkU8(u8)){
-    bytesRead += chunk.length;
-    const text = carry + decoder.decode(chunk, {stream:true});
-    const lastClose = text.lastIndexOf('>');
-    if (lastClose === -1){
-      carry = text;
-      continue;
-    }
-    const processable = text.slice(0, lastClose+1);
-    carry = text.slice(lastClose+1);
-    processChunk(processable);
-
-    const now = Date.now();
-    if (now - lastProgressAt > 150){
-      lastProgressAt = now;
-      const ratio = bytesRead / totalBytes;
-      const pct = 25 + Math.round(ratio * 65);
-      postMessage({type:'progress', pct: Math.min(pct, 90), text: `Scanning… ${(bytesRead/1_000_000).toFixed(0)} MB / ${(totalBytes/1_000_000).toFixed(0)} MB`});
-    }
+function ingestBytes(u8){
+  bytesScanned += u8.length;
+  const text = carry + decoder.decode(u8, {stream:true});
+  const lastClose = text.lastIndexOf('>');
+  if (lastClose === -1){
+    carry = text;
+    return;
   }
+  const processable = text.slice(0, lastClose+1);
+  carry = text.slice(lastClose+1);
+  processChunkStr(processable);
+
+  const now = Date.now();
+  if (now - lastProgressAt > 250){
+    lastProgressAt = now;
+    postMessage({type:'progress', pct: Math.min(50 + Math.round(bytesScanned/30_000_000), 92), text: `Scanning… ${(bytesScanned/1_000_000).toFixed(0)} MB`});
+  }
+}
+
+function finalize(){
+  // Flush decoder
   carry += decoder.decode();
-  if (carry) processChunk(carry);
+  if (carry) processChunkStr(carry);
+  carry = '';
 
   postMessage({type:'progress', pct: 95, text:'Building summaries…'});
 
@@ -595,13 +598,24 @@ async function parseExport(payload){
   postMessage({type:'done', summary});
 }
 
-self.onmessage = async (e) => {
-  if (e.data.type === 'parse'){
-    try {
-      await parseExport(e.data);
-    } catch(err){
-      postMessage({type:'error', message: (err && err.message) ? err.message : String(err), stack: err && err.stack});
+self.onmessage = (e) => {
+  const d = e.data;
+  try {
+    if (d.type === 'start'){
+      resetState();
+      postMessage({type:'progress', pct: 1, text:'Worker ready…'});
+    } else if (d.type === 'chunk'){
+      ingestBytes(d.u8);
+    } else if (d.type === 'end'){
+      finalize();
+    } else if (d.type === 'parse'){
+      // Legacy single-shot mode (kept for compatibility)
+      resetState();
+      ingestBytes(d.u8);
+      finalize();
     }
+  } catch(err){
+    postMessage({type:'error', message: (err && err.message) ? err.message : String(err), stack: err && err.stack});
   }
 };
 
@@ -689,70 +703,106 @@ async function dbClear(){
 
 // ---------- Worker ----------
 async function startParse(file){
-  // Step 1 — main thread decompresses zip (JSZip is loaded here) and yields a Uint8Array of XML.
-  let u8;
-  if (/\.zip$/i.test(file.name)){
-    $('#progress-text').textContent = 'Opening zip…';
-    $('#progress-fill').style.width = '3%';
-    const zip = await JSZip.loadAsync(file);
-    let xmlEntry = null;
-    zip.forEach((path, entry) => {
-      const p = path.toLowerCase();
-      if (p.endsWith('export.xml') && !p.includes('cda')) xmlEntry = entry;
-    });
-    if (!xmlEntry){
-      zip.forEach((path, entry) => {
-        const p = path.toLowerCase();
-        if (p.endsWith('.xml') && !p.includes('cda') && !xmlEntry) xmlEntry = entry;
-      });
-    }
-    if (!xmlEntry) throw new Error('export.xml not found inside zip');
-    $('#progress-text').textContent = 'Decompressing XML…';
-    u8 = await xmlEntry.async('uint8array', (meta) => {
-      const pct = 3 + Math.round(meta.percent * 0.20);
-      $('#progress-fill').style.width = pct + '%';
-      $('#progress-text').textContent = `Decompressing XML… ${Math.round(meta.percent)}%`;
-    });
-  } else if (/\.xml$/i.test(file.name)){
-    $('#progress-text').textContent = 'Reading XML…';
-    $('#progress-fill').style.width = '5%';
-    const buf = await file.arrayBuffer();
-    u8 = new Uint8Array(buf);
-  } else {
-    throw new Error('Unsupported file type — please upload export.zip or export.xml');
-  }
+  // Streaming approach: feed XML chunks to the worker as they're decompressed.
+  // This keeps peak memory low — important for iOS Safari (~1-1.5GB tab limit).
 
-  // Step 2 — spawn worker and transfer the Uint8Array.
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
+    // Spawn worker first
     const src = $('#worker-src').textContent;
     const blob = new Blob([src], {type:'application/javascript'});
     const worker = new Worker(URL.createObjectURL(blob));
+
+    let settled = false;
+    function done(summary){ if (!settled){ settled = true; worker.terminate(); resolve(summary); } }
+    function fail(err){ if (!settled){ settled = true; worker.terminate(); reject(err); } }
+
     worker.onmessage = (e) => {
       const d = e.data;
       if (d.type === 'progress'){
         $('#progress-fill').style.width = d.pct + '%';
         $('#progress-text').textContent = d.text;
       } else if (d.type === 'done'){
-        worker.terminate();
-        resolve(d.summary);
+        done(d.summary);
       } else if (d.type === 'error'){
-        worker.terminate();
         const err = new Error(d.message || 'Worker error');
         if (d.stack) err.stack = d.stack;
-        reject(err);
+        fail(err);
       }
     };
     worker.onerror = (e) => {
-      worker.terminate();
-      const msg = e && (e.message || e.filename) ? `${e.message || ''} (${e.filename || ''}:${e.lineno || '?'}:${e.colno || '?'})` : 'Unknown worker error';
-      reject(new Error('Worker crash: ' + msg));
+      const msg = e && (e.message || e.filename) ? `${e.message || ''} (${e.filename || ''}:${e.lineno || '?'}:${e.colno || '?'})` : 'Unknown worker error (likely out of memory on iOS)';
+      fail(new Error('Worker crash: ' + msg));
     };
-    worker.onmessageerror = (e) => {
-      worker.terminate();
-      reject(new Error('Worker messageerror: failed to deserialize message'));
-    };
-    // Transfer the buffer so we don't copy 1.5GB
-    worker.postMessage({type:'parse', u8}, [u8.buffer]);
+    worker.onmessageerror = () => fail(new Error('Worker messageerror'));
+
+    try {
+      // Tell the worker we're starting a streaming parse
+      worker.postMessage({type:'start', filename: file.name});
+
+      if (/\.zip$/i.test(file.name)){
+        $('#progress-text').textContent = 'Opening zip…';
+        $('#progress-fill').style.width = '1%';
+        const zip = await JSZip.loadAsync(file);
+        let xmlEntry = null;
+        zip.forEach((path, entry) => {
+          const p = path.toLowerCase();
+          if (p.endsWith('export.xml') && !p.includes('cda')) xmlEntry = entry;
+        });
+        if (!xmlEntry){
+          zip.forEach((path, entry) => {
+            const p = path.toLowerCase();
+            if (p.endsWith('.xml') && !p.includes('cda') && !xmlEntry) xmlEntry = entry;
+          });
+        }
+        if (!xmlEntry) throw new Error('export.xml not found inside zip');
+
+        $('#progress-text').textContent = 'Streaming XML…';
+
+        // Use JSZip's internalStream to get decompressed bytes in chunks.
+        // This is the key memory optimization for iOS.
+        await new Promise((streamResolve, streamReject) => {
+          const stream = xmlEntry.internalStream('uint8array');
+          let totalEmitted = 0;
+          stream.on('data', (chunk, meta) => {
+            totalEmitted += chunk.length;
+            const pct = Math.round((meta.percent || 0) * 0.5);  // 0→50%
+            $('#progress-fill').style.width = pct + '%';
+            $('#progress-text').textContent = `Decompressing… ${Math.round(meta.percent || 0)}%`;
+            // Transfer chunk to worker (zero-copy)
+            const buf = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+            const u8 = new Uint8Array(buf);
+            worker.postMessage({type:'chunk', u8}, [u8.buffer]);
+          });
+          stream.on('error', (e) => streamReject(e));
+          stream.on('end', () => streamResolve());
+          stream.resume();
+        });
+
+      } else if (/\.xml$/i.test(file.name)){
+        $('#progress-text').textContent = 'Reading XML…';
+        // Stream the file in chunks (Safari supports Blob.slice + FileReader)
+        const CHUNK = 4 * 1024 * 1024;
+        const total = file.size;
+        let offset = 0;
+        while (offset < total){
+          const slice = file.slice(offset, Math.min(offset + CHUNK, total));
+          const buf = await slice.arrayBuffer();
+          const u8 = new Uint8Array(buf);
+          worker.postMessage({type:'chunk', u8}, [u8.buffer]);
+          offset += CHUNK;
+          const pct = Math.round((offset / total) * 50);
+          $('#progress-fill').style.width = pct + '%';
+          $('#progress-text').textContent = `Reading XML… ${Math.round(offset/1_000_000)}MB / ${Math.round(total/1_000_000)}MB`;
+        }
+      } else {
+        throw new Error('Unsupported file type — please upload export.zip or export.xml');
+      }
+
+      // Signal end of input — worker will finish parsing and post 'done'
+      worker.postMessage({type:'end'});
+    } catch(err){
+      fail(err);
+    }
   });
 }
 
@@ -766,6 +816,13 @@ let charts = {}; // chart instances by id
 init();
 
 async function init(){
+  // Show iOS warning if on iOS / iPadOS
+  const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (isiOS){
+    const w = $('#ios-warning');
+    if (w) w.style.display = '';
+  }
+
   setupUploadHandlers();
   setupTabs();
   setupRangeControls();
